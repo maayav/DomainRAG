@@ -1,0 +1,16 @@
+question,answer,contexts
+What is a Python decorator?,A decorator is a function that takes another function and extends its behavior without explicitly modifying it using the @ syntax.,python-decorators.md
+How do you preserve function metadata when using decorators?,Use functools.wraps to preserve __name__ and __doc__ from the original function.,python-decorators.md
+What does an INNER JOIN return?,Only rows where there is a match in both tables based on the join condition.,sql-joins.md
+What is the difference between LEFT JOIN and RIGHT JOIN?,LEFT JOIN returns all rows from the left table with NULLs for non-matching right rows; RIGHT JOIN is the reverse returning all rows from the right table.,sql-joins.md
+What is Docker Compose used for?,Defining and running multi-container Docker applications using a YAML configuration file.,docker-compose.md
+What does docker compose down -v do?,Tears down all services and removes named volumes.,docker-compose.md
+What is the purpose of git rebase?,To rewrite commit history by moving or combining commits onto a different base.,git-rebase.md
+What does chmod 755 mean?,Sets owner to rwx (7), group to r-x (5), and others to r-x (5).,linux-permissions.md
+What is the sticky bit used for?,Restricts file deletion in shared directories so only owners can delete their own files.,linux-permissions.md
+What is a RESTful resource?,A named abstraction identified by a URL that clients interact with using standard HTTP methods like GET POST PUT and DELETE.,rest-api-design.md
+What HTTP status code indicates a successful resource creation?,201 Created.,rest-api-design.md
+What is an async coroutine in Python?,A function defined with async def that can be suspended at await expressions allowing the event loop to run other tasks.,async-python.md
+What is a GIN index in PostgreSQL?,A Generalized Inverted Index designed for composite types like arrays JSONB and full-text search vectors.,postgres-indexing.md
+What is the purpose of a CI/CD pipeline?,To automate the building testing and deployment of software changes after every merge.,ci-cd-basics.md
+What is a Cross-Site Scripting (XSS) attack?,An attack where malicious scripts are injected into content served to other users.,web-security.md
