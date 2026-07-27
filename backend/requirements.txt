@@ -1,0 +1,11 @@
+llama-index
+llama-index-embeddings-huggingface
+llama-index-llms-ollama
+llama-index-vector-stores-faiss
+faiss-cpu
+sentence-transformers
+fastapi
+uvicorn
+pandas
+ragas
+datasets
