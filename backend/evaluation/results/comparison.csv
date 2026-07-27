@@ -1,0 +1,4 @@
+config,chunk_size,chunk_overlap,top_k,latency_avg
+A_baseline,512,128,3,3.668
+B_large_chunks,1024,256,5,4.364
+C_more_docs,512,128,5,4.146

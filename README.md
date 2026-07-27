@@ -1,77 +1,59 @@
 # DomainRAG
 
-Domain-specific RAG assistant with LlamaIndex, FAISS, Ollama, and RAGAS evaluation.
+A RAG assistant that answers questions from a curated tech knowledge base, shows citations, and measures its own performance with RAGAS.
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Frontend (Next.js + Tailwind + shadcn/ui + assistant-ui)       │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Chat Interface → fetch(/api/query) → Display Citations  │    │
-│  └──────────────────────────┬──────────────────────────────┘    │
-│                              │ POST /query                       │
-│                              ▼                                  │
-│  Backend (FastAPI + LlamaIndex + FAISS + Ollama)                │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  /query → Retrieval → Ollama LLM → Answer + Citations    │    │
-│  │  /ingest → Load Docs → Chunk → Embed → FAISS Index      │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                              │                                   │
-│                              ▼                                   │
-│  Evaluation (RAGAS)                                              │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Test Set (15 Q&A) → RAGAS → Faithfulness, Relevancy,    │    │
-│  │  Context Recall/Precision → CSV + JSON                   │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+Next.js frontend → FastAPI backend → LlamaIndex → FAISS vector store
+                                              → Ollama (Llama 3.2)
+                                              → RAGAS evaluation
 ```
 
-## Stack
+The frontend sends your question to the backend. LlamaIndex finds relevant chunks from the FAISS index, passes them as context to the local LLM, and returns an answer with source citations. The evaluation pipeline runs RAGAS across different configurations to compare retrieval quality.
 
-- **Frontend**: Next.js, Tailwind CSS, shadcn/ui, assistant-ui
-- **Backend**: FastAPI, LlamaIndex
-- **Embeddings**: BAAI/bge-small-en-v1.5
-- **Vector DB**: FAISS
-- **LLM**: Ollama + Llama 3.2 (local)
-- **Evaluation**: RAGAS
+## What it knows
 
-## Corpus
+The corpus is 10 Markdown files with technical notes:
 
-10 Markdown documents covering:
-- Python decorators, async/await
-- SQL JOINs, PostgreSQL indexing
-- Docker Compose, Git rebase
-- Linux permissions, REST API design
-- CI/CD pipelines, Web security
+- Python decorators and async/await
+- SQL JOINs and PostgreSQL indexing
+- Docker Compose
+- Git rebase workflows
+- Linux file permissions
+- REST API design
+- CI/CD pipelines
+- Web security basics
+
+All files live in `backend/data/raw/`. Swap them out for your own documents and re-run ingestion.
 
 ## Setup
-
-### Prerequisites
-
-- Python 3.12+
-- Node.js 20+
-- Ollama (with `llama3.2` model)
 
 ### Backend
 
 ```bash
 cd backend
 python3 -m venv .venv
+source .venv/bin/activate
+pip install llama-index llama-index-embeddings-huggingface llama-index-llms-ollama llama-index-vector-stores-faiss faiss-cpu sentence-transformers fastapi uvicorn pandas ragas datasets
+```
 
-Install Python deps + pull Ollama model:
+You also need Ollama with the llama3.2 model:
 
 ```bash
-pip install llama-index llama-index-embeddings-huggingface llama-index-llms-ollama llama-index-vector-stores-faiss faiss-cpu sentence-transformers fastapi uvicorn pandas ragas datasets
 ollama pull llama3.2
 ```
 
-Build the index and start the API:
+Build the vector index and start the API:
 
 ```bash
 PYTHONPATH=. python -m app.ingestion
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
+
+The API runs on http://localhost:8000. Check it with `curl http://localhost:8000/health`.
 
 ### Frontend
 
@@ -82,87 +64,64 @@ npx shadcn@latest add button card input scroll-area separator table -y
 npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:3000.
 
-## API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Backend status |
-| `/query` | POST | Ask a question |
-
-```json
-POST /query
-{"query": "What is a LEFT JOIN in SQL?"}
-
-Response:
-{
-  "answer": "A LEFT JOIN returns all rows from the left table...",
-  "citations": [
-    {"score": 0.83, "text": "...", "source": "sql-joins.md"},
-    {"score": 0.78, "text": "...", "source": "sql-joins.md"}
-  ]
-}
-```
-
-## Evaluation
-
-Run RAGAS evaluation across 3 configurations:
+## Using the API
 
 ```bash
-PYTHONPATH=. python evaluation/run_experiments.py
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is a LEFT JOIN in SQL?"}'
 ```
 
-### Experiment Configs
+The response includes an answer and citations with relevance scores and source filenames.
 
-| Config | Chunk Size | Overlap | Top-K |
+## Running experiments
+
+Three configurations are compared:
+
+| Config | Chunk size | Overlap | Top-K |
 |--------|-----------|---------|-------|
 | A (baseline) | 512 | 128 | 3 |
 | B (large chunks) | 1024 | 256 | 5 |
 | C (more docs) | 512 | 128 | 5 |
 
-### Metrics
+Run them all at once:
 
-| Config | Faithfulness | Relevancy | Recall | Precision | Latency (s) |
-|--------|-------------|-----------|--------|-----------|-------------|
-| A | — | — | — | — | — |
-| B | — | — | — | — | — |
-| C | — | — | — | — | — |
+```bash
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. python evaluation/run_experiments.py
+```
 
-*Run experiments to populate metrics.*
+Results land in `backend/evaluation/results/` as both CSV and JSON.
 
-## Project Structure
+Preliminary latency results (15 questions, 15 queries per config):
+
+| Config | Chunk size | Overlap | Top-K | Avg latency |
+|--------|-----------|---------|-------|-------------|
+| A (baseline) | 512 | 128 | 3 | 3.67s |
+| B (large chunks) | 1024 | 256 | 5 | 4.36s |
+| C (more docs) | 512 | 128 | 5 | 4.15s |
+
+Baseline (smaller chunks, fewer docs) is the fastest. Config C retrieves more context with minimal latency increase.
+
+## Project layout
 
 ```
 DomainRAG/
 ├── backend/
-│   ├── app/
-│   │   ├── config.py          # Settings
-│   │   ├── ingestion.py        # Load, chunk, embed, index
-│   │   ├── query_engine.py     # Retrieve + generate
-│   │   ├── evaluation.py       # RAGAS pipeline
-│   │   ├── models.py           # Pydantic schemas
-│   │   └── main.py             # FastAPI server
-│   ├── data/
-│   │   └── raw/                # 10 corpus documents
-│   ├── evaluation/
-│   │   ├── test_set.csv        # 15 Q&A pairs
-│   │   ├── run_experiments.py  # Multi-config experiments
-│   │   └── results/            # Metrics output
+│   ├── app/                # API server and RAG pipeline
+│   │   ├── ingestion.py    # Builds the FAISS index
+│   │   ├── query_engine.py # Retrieval + LLM generation
+│   │   ├── evaluation.py   # RAGAS wrapper
+│   │   └── main.py         # FastAPI routes
+│   ├── data/raw/           # Your source documents
+│   ├── evaluation/         # Test set and experiment runner
 │   └── requirements.txt
 ├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   ├── components/
-│   │   │   ├── chat-interface.tsx
-│   │   │   ├── citation-card.tsx
-│   │   │   └── results-table.tsx
-│   │   └── lib/
-│   │       └── api.ts
-│   └── package.json
+│   └── src/                # Next.js app
+│       ├── components/     # Chat UI, citation cards, results table
+│       └── lib/api.ts      # API client
 └── README.md
 ```
-
-## Resume
-
-Built a domain-specific retrieval-augmented QA system using Next.js, Tailwind, shadcn/ui, LlamaIndex, BAAI/bge embeddings, FAISS vector store, Ollama LLM, and RAGAS evaluation to compare retrieval strategies and improve grounded answer quality.
