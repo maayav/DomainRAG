@@ -16,3 +16,16 @@ LLM_TEMPERATURE = 0.1
 LLM_TIMEOUT = 120
 
 SYSTEM_PROMPT = """You are a technical assistant. Answer the question using only the provided context. If the context does not contain enough information, say so. Cite your sources by referencing the document filename."""
+
+# Security
+API_KEY = os.environ.get("DOMAINRAG_API_KEY", "")
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 30
+
+# Circuit breaker
+CIRCUIT_BREAKER_THRESHOLD = 3
+CIRCUIT_BREAKER_RESET = 60
+
+# Logging
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+LOG_FORMAT = "json"
