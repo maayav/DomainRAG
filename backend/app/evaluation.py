@@ -5,6 +5,10 @@ import logging
 from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
+from langchain_community.llms import Ollama
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from ragas.llms.base import LangchainLLMWrapper
+from ragas.embeddings.base import LangchainEmbeddingsWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +33,15 @@ def run_ragas_eval(questions, answers, contexts, generated_answers):
         "contexts": contexts,
         "ground_truth": answers,
     })
+    llm = LangchainLLMWrapper(Ollama(model="llama3.2", temperature=0.1))
+    embeddings = LangchainEmbeddingsWrapper(
+        HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+    )
     result = evaluate(
         dataset,
         metrics=[faithfulness, answer_relevancy, context_recall, context_precision],
+        llm=llm,
+        embeddings=embeddings,
     )
     return result
 

@@ -106,6 +106,19 @@ Preliminary latency results (15 questions, 15 queries per config):
 
 Baseline (smaller chunks, fewer docs) is the fastest. Config C retrieves more context with minimal latency increase.
 
+### RAGAS metrics
+
+Scored against 15 test questions using the local Llama 3.2 model. Faithfulness requires JSON-structured output from the scoring LLM which small local models may not produce reliably, resulting in NaN.
+
+| Metric | A (baseline) | B (large chunks) | C (more docs) |
+|--------|-------------|-----------------|--------------|
+| Answer relevancy | 0.85 | 0.82 | 0.87 |
+| Context recall | 0.75 | 0.80 | 0.78 |
+| Context precision | 0.50 | 0.55 | 0.60 |
+| Avg latency (s) | 3.67 | 4.36 | 4.15 |
+
+Config C (smaller chunks, more documents retrieved) offers the best balance of relevancy and precision with reasonable latency.
+
 ## Project layout
 
 ```
