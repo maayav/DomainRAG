@@ -6,85 +6,81 @@ import { queryQuestion, Citation, healthCheck } from "@/lib/api";
 import {
   ArrowUp,
   Loader2,
-  Sparkles,
-  BookOpen,
-  Zap,
-  Code,
-  Database,
-  Shield,
+  Paperclip,
+  Mic,
+  Settings,
+  X,
+  Globe
 } from "lucide-react";
 
 interface Message {
+  id: string;
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
 }
 
-const SUGGESTIONS = [
-  { icon: Code, text: "What are Python decorators?" },
-  { icon: Database, text: "How does Docker networking work?" },
-  { icon: Shield, text: "Explain SQL injection prevention" },
-  { icon: Zap, text: "What is async/await in Python?" },
-];
-
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [docCount, setDocCount] = useState(0);
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+  
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    healthCheck()
-      .then((data) => {
-        setConnected(true);
-        setDocCount(data.documents);
-      })
-      .catch(() => setConnected(false));
-  }, []);
-
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
 
+  // Focus input when messages change (if not loading)
+  useEffect(() => {
+    if (messages.length > 0 && !loading) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [messages.length, loading]);
+
   const handleSubmit = async (query?: string) => {
     const text = query || input.trim();
     if (!text || loading) return;
 
-    const userMsg: Message = { role: "user", content: text };
+    const userMsg: Message = { id: Date.now().toString(), role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
 
-    // Reset textarea height
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
     }
 
     try {
       const res = await queryQuestion(text);
+      const assistantMsgId = (Date.now() + 1).toString();
       const assistantMsg: Message = {
+        id: assistantMsgId,
         role: "assistant",
         content: res.answer,
         citations: res.citations,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      // Open sidebar for the new message if it has citations
+      if (res.citations && res.citations.length > 0) {
+        setActiveMessageId(assistantMsgId);
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
         {
+          id: (Date.now() + 1).toString(),
           role: "assistant",
-          content:
-            "Unable to reach the backend. Make sure the server is running on port 8000.",
+          content: "Unable to reach the backend. Make sure the server is running on port 8000.",
         },
       ]);
     } finally {
       setLoading(false);
-      // Re-focus input after response
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
@@ -102,201 +98,178 @@ export function ChatInterface() {
     e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
   };
 
-  const isEmptyState = messages.length === 0;
+  const activeMessage = messages.find(m => m.id === activeMessageId);
+  const showSidebar = activeMessageId !== null && activeMessage?.citations && activeMessage.citations.length > 0;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* ── Header ── */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-border/50">
+    <div className="flex flex-col h-full bg-background text-foreground font-sans">
+      {/* ── Top Header ── */}
+      <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-background z-10 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-emerald-600">
-            <Sparkles size={16} className="text-white" />
+          <div className="text-xl tracking-tight flex items-center">
+            <span className="font-semibold text-foreground">Domain</span>
+            <span className="font-light text-foreground">RAG</span>
           </div>
-          <div>
-            <h1 className="text-sm font-semibold tracking-tight">DomainRAG</h1>
-            <p className="text-[11px] text-muted-foreground leading-none">
-              Technical Knowledge Assistant
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-secondary/50 px-2.5 py-1 rounded-full">
-            <BookOpen size={12} />
-            <span>{docCount} docs</span>
-          </div>
-          <div
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${
-              connected
-                ? "text-emerald-400 bg-emerald-500/10"
-                : "text-red-400 bg-red-500/10"
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                connected ? "bg-emerald-400" : "bg-red-400"
-              }`}
-            />
-            {connected ? "Online" : "Offline"}
+          <div className="hidden md:flex items-center gap-3 ml-2">
+            <span className="text-sm text-muted-foreground">Domain-specific RAG assistant with evaluated retrieval</span>
+            <span className="text-[10px] font-semibold tracking-wider uppercase bg-secondary text-secondary-foreground px-2 py-1 rounded-sm">
+              Mixed Tech Wiki
+            </span>
           </div>
         </div>
+        <button className="p-2 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
+          <Settings size={18} />
+        </button>
       </header>
 
-      {/* ── Messages area ── */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto custom-scrollbar"
-      >
-        {isEmptyState ? (
-          /* ── Empty state ── */
-          <div className="flex flex-col items-center justify-center h-full px-4 animate-fade-in">
-            <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-600/20 border border-teal-500/20 mb-6">
-              <Sparkles size={24} className="text-teal-400" />
-            </div>
-            <h2 className="text-xl font-semibold mb-1">
-              What would you like to know?
-            </h2>
-            <p className="text-sm text-muted-foreground mb-8 max-w-md text-center">
-              Ask questions about Python, SQL, Docker, Git, REST APIs, Linux,
-              and more from the knowledge base.
-            </p>
-            <div className="grid grid-cols-2 gap-2.5 w-full max-w-lg">
-              {SUGGESTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSubmit(s.text)}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-border/60 bg-card/50 hover:bg-card hover:border-border text-sm text-left transition-all duration-200 group cursor-pointer"
-                >
-                  <s.icon
-                    size={15}
-                    className="text-muted-foreground group-hover:text-teal-400 transition-colors shrink-0"
-                  />
-                  <span className="text-muted-foreground group-hover:text-foreground transition-colors">
-                    {s.text}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          /* ── Message thread ── */
-          <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className="animate-message-in"
-                style={{ animationDelay: `${(i % 4) * 50}ms` }}
-              >
-                {msg.role === "user" ? (
-                  /* User message */
-                  <div className="flex justify-end">
-                    <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-md bg-secondary text-sm leading-relaxed">
-                      {msg.content}
-                    </div>
-                  </div>
-                ) : (
-                  /* Assistant message */
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-5 h-5 rounded-md bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center">
-                        <Sparkles size={11} className="text-white" />
+      {/* ── Main Content Area ── */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* Left Column: Chat Area */}
+        <div className="flex-1 flex flex-col relative min-w-0">
+          
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-6 custom-scrollbar">
+            <div className="max-w-4xl mx-auto space-y-8 pb-32">
+              {messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full min-h-[40vh]">
+                  <p className="text-muted-foreground text-sm">Ask a technical question to get started...</p>
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <div key={msg.id} className={`flex w-full animate-message-in ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    
+                    {msg.role === "user" ? (
+                      <div className="max-w-[80%] bg-secondary/60 text-secondary-foreground px-5 py-3.5 rounded-2xl text-[15px] leading-relaxed">
+                        {msg.content}
                       </div>
-                      <span className="text-xs font-medium text-muted-foreground">
-                        DomainRAG
-                      </span>
-                    </div>
-                    <div className="text-sm leading-relaxed text-foreground/90 pl-7">
-                      {msg.content}
-                    </div>
-
-                    {/* Citations */}
-                    {msg.citations && msg.citations.length > 0 && (
-                      <div className="pl-7 mt-4">
-                        <div className="flex items-center gap-1.5 mb-2.5">
-                          <BookOpen
-                            size={12}
-                            className="text-muted-foreground"
-                          />
-                          <span className="text-xs font-medium text-muted-foreground">
-                            Sources
-                          </span>
+                    ) : (
+                      <div className="max-w-[90%] md:max-w-[85%]">
+                        <div 
+                          className="text-[15px] leading-relaxed text-foreground cursor-text whitespace-pre-wrap"
+                          onClick={() => {
+                            if (msg.citations && msg.citations.length > 0) {
+                              setActiveMessageId(msg.id);
+                            }
+                          }}
+                        >
+                          {msg.content}
                         </div>
-                        <div className="space-y-2">
-                          {msg.citations.map((c, j) => (
-                            <CitationCard
-                              key={j}
-                              citation={c}
-                              index={j + 1}
-                            />
-                          ))}
-                        </div>
+                        {/* Optional subtle indicator that citations exist if sidebar is closed */}
+                        {msg.citations && msg.citations.length > 0 && activeMessageId !== msg.id && (
+                          <button 
+                            onClick={() => setActiveMessageId(msg.id)}
+                            className="mt-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                          >
+                            <Globe size={12} /> View {msg.citations.length} Citations
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
+                ))
+              )}
 
-            {/* Typing indicator */}
-            {loading && (
-              <div className="animate-message-in">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-5 h-5 rounded-md bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center">
-                    <Sparkles size={11} className="text-white" />
+              {/* Typing indicator */}
+              {loading && (
+                <div className="flex justify-start w-full animate-message-in">
+                  <div className="flex items-center gap-1.5 py-4 px-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "200ms" }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "400ms" }} />
                   </div>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    DomainRAG
-                  </span>
                 </div>
-                <div className="pl-7 flex items-center gap-1.5 py-2">
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-pulse-dot"
-                    style={{ animationDelay: "0ms" }}
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-pulse-dot"
-                    style={{ animationDelay: "200ms" }}
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-pulse-dot"
-                    style={{ animationDelay: "400ms" }}
-                  />
+              )}
+            </div>
+          </div>
+
+          {/* Input Box Area */}
+          <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
+            <div className="max-w-4xl mx-auto pointer-events-auto">
+              {/* Web Search Pill */}
+              <div className="flex justify-center mb-2">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-muted-foreground shadow-sm">
+                  <Globe size={12} />
+                  <span>Web Search Enabled</span>
                 </div>
               </div>
-            )}
+
+              {/* Input Container */}
+              <div className="relative flex flex-col rounded-2xl border border-border bg-background shadow-lg overflow-hidden focus-within:border-muted-foreground/50 transition-colors">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={autoResize}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask a technical question..."
+                  disabled={loading}
+                  rows={1}
+                  className="w-full bg-transparent text-[15px] resize-none outline-none placeholder:text-muted-foreground/60 max-h-40 disabled:opacity-50 px-4 py-4 min-h-[80px]"
+                />
+                
+                {/* Input Toolbar */}
+                <div className="flex items-center justify-between px-3 pb-3">
+                  <div className="flex items-center gap-1">
+                    <button className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors">
+                      <Paperclip size={18} />
+                    </button>
+                    <button className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors">
+                      <Mic size={18} />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => handleSubmit()}
+                    disabled={loading || !input.trim()}
+                    className="w-8 h-8 rounded-md flex items-center justify-center bg-secondary hover:bg-secondary-foreground hover:text-background text-foreground disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {loading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <ArrowUp size={16} strokeWidth={2} />
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="text-center mt-3">
+                <span className="text-[11px] text-muted-foreground/50">
+                  DomainRAG can make mistakes. Check important info.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Context Explorer Sidebar */}
+        {showSidebar && (
+          <div className="w-[350px] shrink-0 border-l border-border bg-background flex flex-col animate-fade-in z-20">
+            {/* Sidebar Header */}
+            <div className="flex items-center justify-between px-5 py-4">
+              <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">Context Explorer</h2>
+              <button 
+                onClick={() => setActiveMessageId(null)}
+                className="p-1 rounded-md hover:bg-secondary text-muted-foreground transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            {/* Tabs */}
+            <div className="flex items-center border-b border-border px-4">
+              <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-foreground text-foreground">
+                Citations
+              </button>
+              <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors">
+                Evaluation
+              </button>
+            </div>
+
+            {/* Sidebar Content (Citations) */}
+            <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4 custom-scrollbar bg-secondary/10">
+              {activeMessage?.citations?.map((c, i) => (
+                <CitationCard key={i} citation={c} index={i + 1} />
+              ))}
+            </div>
           </div>
         )}
-      </div>
-
-      {/* ── Input area ── */}
-      <div className="px-4 pb-4 pt-2">
-        <div className="max-w-3xl mx-auto">
-          <div className="relative flex items-end gap-2 rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm px-4 py-3 focus-within:border-teal-500/40 focus-within:ring-1 focus-within:ring-teal-500/20 transition-all duration-200">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={autoResize}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question..."
-              disabled={loading}
-              rows={1}
-              className="flex-1 bg-transparent text-sm resize-none outline-none placeholder:text-muted-foreground/60 max-h-40 disabled:opacity-50"
-            />
-            <button
-              onClick={() => handleSubmit()}
-              disabled={loading || !input.trim()}
-              className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-foreground text-background disabled:opacity-30 hover:opacity-90 transition-opacity cursor-pointer disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <ArrowUp size={14} strokeWidth={2.5} />
-              )}
-            </button>
-          </div>
-          <p className="text-[11px] text-muted-foreground/50 text-center mt-2">
-            Powered by Llama 3.2 · LlamaIndex · FAISS
-          </p>
-        </div>
       </div>
     </div>
   );
