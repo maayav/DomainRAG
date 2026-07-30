@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .venv/
 .venv_old/
+venv/
 
 # Data
 backend/data/faiss_index/
