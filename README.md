@@ -38,8 +38,8 @@ All files live in `backend/data/raw/`. Swap them out for your own documents and 
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -49,10 +49,20 @@ You also need Ollama with the llama3.2 model:
 ollama pull llama3.2
 ```
 
-Build the vector index and start the API:
+Build the vector index:
 
 ```bash
-PYTHONPATH=. python -m app.ingestion
+PYTHONPATH=. ./venv/bin/python -m app.ingestion
+```
+
+Start the API:
+
+```bash
+# Option A: Use venv binary directly
+PYTHONPATH=. ./venv/bin/uvicorn app.main:app --reload --port 8000
+
+# Option B: Activate the venv first
+source venv/bin/activate
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
