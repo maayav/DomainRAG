@@ -1,4 +1,4 @@
 config,chunk_size,chunk_overlap,top_k,latency_avg,faithfulness,answer_relevancy,context_recall,context_precision
-A_baseline,512,128,3,5.656,0.839,0.891,1.0,1.0
-B_large_chunks,1024,256,5,13.824,0.788,0.925,1.0,1.0
-C_more_docs,512,128,5,7.124,0.881,0.899,1.0,1.0
+A_baseline,512,128,3,2.208,0.967,0.95,1.0,1.0
+B_large_chunks,1024,256,5,4.319,0.95,0.951,1.0,1.0
+C_more_docs,512,128,5,3.315,0.918,0.944,1.0,1.0

@@ -25,3 +25,29 @@ class HealthResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class ModelUpdateRequest(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=32)
+    model: str = Field(..., min_length=1, max_length=128)
+    api_key: str = Field("", max_length=512)
+    base_url: str = Field("", max_length=512)
+
+
+class ModelStatus(BaseModel):
+    provider: str
+    model: str
+    base_url: str = ""
+    using_local: bool
+
+
+class ModelsResponse(BaseModel):
+    current: ModelStatus
+    local: list[str]
+    providers: dict
+
+
+class UploadResult(BaseModel):
+    uploaded: list[str]
+    skipped: list[dict]
+    documents: int

@@ -6,21 +6,24 @@ import logging
 from contextlib import asynccontextmanager
 from collections import defaultdict
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 
-from llama_index.llms.ollama import Ollama
-
 from app.config import (
-    DATA_DIR, LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT, SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
     RATE_LIMIT_WINDOW, RATE_LIMIT_MAX,
 )
-from app.models import QueryRequest, QueryResponse, Citation
+from app.models import (
+    QueryRequest, QueryResponse, Citation,
+    ModelUpdateRequest, ModelStatus, ModelsResponse, UploadResult,
+)
 from app.ingestion import build_index, load_index
 from app.query_engine import query_index, retrieve_context, create_query_engine
 from app.auth import AuthMiddleware, API_KEY
 from app.logger import StructuredLogger
+from app import model_registry
+from app.uploads import store_upload, ALLOWED_EXTENSIONS, MAX_FILES_PER_REQUEST
 
 logger = StructuredLogger(__name__)
 
@@ -155,11 +158,7 @@ Question: {request.query}
 
 Answer:"""
 
-        llm = Ollama(
-            model=LLM_MODEL,
-            temperature=LLM_TEMPERATURE,
-            request_timeout=LLM_TIMEOUT,
-        )
+        llm = model_registry.make_llm()
 
         full_response = ""
         try:
@@ -184,6 +183,72 @@ Answer:"""
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/documents", response_model=UploadResult)
+async def upload_documents(files: list[UploadFile] = File(...)):
+    """Upload user documents: validated, stored in the corpus, and re-indexed."""
+    if len(files) > MAX_FILES_PER_REQUEST:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_FILES_PER_REQUEST} files per request")
+
+    global index, query_engine
+    uploaded, skipped = [], []
+    for f in files:
+        content = await f.read()
+        try:
+            name = store_upload(f.filename or "unnamed", content)
+            uploaded.append(name)
+        except ValueError as e:
+            skipped.append({"name": f.filename, "reason": str(e)})
+
+    if not uploaded:
+        raise HTTPException(status_code=400, detail="No valid files uploaded")
+
+    logger.info(f"Re-indexing corpus after {len(uploaded)} upload(s)")
+    index = build_index()
+    query_engine = create_query_engine(index)
+
+    return UploadResult(
+        uploaded=uploaded,
+        skipped=skipped,
+        documents=len(index.docstore.docs),
+    )
+
+
+@app.get("/models", response_model=ModelsResponse)
+async def get_models():
+    """Return the active model config, local Ollama models, and provider options."""
+    return ModelsResponse(
+        current=ModelStatus(**model_registry.get_config()),
+        local=model_registry.installed_local_models(),
+        providers=model_registry.OPENAI_COMPATIBLE_PROVIDERS,
+    )
+
+
+@app.post("/models", response_model=ModelStatus)
+async def set_model(request: ModelUpdateRequest):
+    """Switch the answer-generation model to a local Ollama model or an OpenAI-compatible provider."""
+    global query_engine
+    try:
+        cfg = model_registry.update_config(
+            provider=request.provider,
+            model=request.model,
+            api_key=request.api_key,
+            base_url=request.base_url,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    query_engine = create_query_engine(index)
+    return ModelStatus(**cfg)
+
+
+@app.post("/models/reset", response_model=ModelStatus)
+async def reset_model():
+    """Revert to the default local Ollama model."""
+    global query_engine
+    cfg = model_registry.reset_config()
+    query_engine = create_query_engine(index)
+    return ModelStatus(**cfg)
 
 
 def sse_event(event_type: str, data) -> str:

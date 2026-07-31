@@ -3,9 +3,9 @@ import time
 import logging
 
 from llama_index.core import Settings
-from llama_index.llms.ollama import Ollama
 
 from app import config as cfg
+from app import model_registry
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,7 @@ _circuit_breaker = CircuitBreaker(
 
 
 def _wrap_ollama():
-    return Ollama(
-        model=cfg.LLM_MODEL,
-        temperature=cfg.LLM_TEMPERATURE,
-        request_timeout=cfg.LLM_TIMEOUT,
-    )
+    return model_registry.make_llm()
 
 
 def create_query_engine(index, top_k: int | None = None):

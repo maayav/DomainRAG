@@ -11,7 +11,7 @@ CHUNK_OVERLAP = 128
 TOP_K = 3
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
-LLM_MODEL = "llama3.2"
+LLM_MODEL = "qwen3:8b"
 LLM_TEMPERATURE = 0.1
 LLM_TIMEOUT = 120
 

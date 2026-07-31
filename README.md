@@ -8,11 +8,11 @@ A RAG assistant that answers questions from a curated tech knowledge base, shows
 
 ```
 Next.js frontend → FastAPI backend → LlamaIndex → FAISS vector store
-                                              → Ollama (Llama 3.2 + Qwen 2.5)
+                                              → Ollama (Qwen 3 8B + Qwen 2.5)
                                               → RAGAS evaluation
 ```
 
-The frontend sends your question to the backend. LlamaIndex finds relevant chunks from the FAISS index, passes them as context to the local LLM, and returns an answer with source citations. The evaluation pipeline runs RAGAS across different configurations to compare retrieval quality.
+The frontend sends your question to the backend. LlamaIndex finds relevant chunks from the FAISS index, passes them as context to the local LLM, and returns an answer with source citations. The evaluation pipeline runs RAGAS across different configurations to compare retrieval quality. You can upload your own documents from the UI, and switch the answer model between local Ollama models and OpenAI-compatible providers (OpenAI, Groq, OpenRouter, or a custom endpoint) from the model settings modal.
 
 ## What it knows
 
@@ -43,12 +43,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-You also need Ollama with the chat model (llama3.2) and the evaluation model (qwen2.5:7b):
+You also need Ollama with the chat model (qwen3:8b) and the evaluation model (qwen2.5:7b):
 
 ```bash
-ollama pull llama3.2
+ollama pull qwen3:8b
 ollama pull qwen2.5:7b
 ```
+
+Ollama models are stored in `~/dev/models/ollama` (set via `OLLAMA_MODELS`). A user-level systemd service (`~/.config/systemd/user/ollama.service`) keeps Ollama running with that location.
 
 Build the vector index:
 
@@ -88,7 +90,24 @@ curl -X POST http://localhost:8000/query \
   -d '{"query": "What is a LEFT JOIN in SQL?"}'
 ```
 
-The response includes an answer and citations with relevance scores and source filenames.
+The response includes an answer and citations with relevance scores and source filenames. Streaming variant at `/query/stream` (Server-Sent Events: thinking steps, citations, then answer tokens).
+
+### Uploading documents
+
+From the UI, click the **+** icon next to the input box to add your own files (`.md`, `.txt`, `.rst`, `.pdf`, up to 10 MB each, 10 per request). Uploaded files are stored in `backend/data/raw/`, the index is rebuilt, and answers immediately include them. Programmatically:
+
+```bash
+curl -X POST http://localhost:8000/documents -F "files=@my-notes.md"
+```
+
+### Switching models
+
+Open the **model settings** (gear icon in the header) to:
+- Pick any model already installed in local Ollama
+- Connect an OpenAI-compatible provider (OpenAI, Groq, OpenRouter, or a custom base URL) with an API key — the key is validated against the provider, held in memory only, and never persisted or returned
+- Reset back to the local default
+
+API: `GET /models` (current config, installed local models, provider options), `POST /models` (apply `{"provider", "model", "api_key", "base_url"}`), `POST /models/reset`.
 
 ### API key auth (optional)
 
@@ -129,13 +148,13 @@ The eval LLM defaults to `qwen2.5:7b` and can be overridden with the `EVAL_MODEL
 
 Results land in `backend/evaluation/results/` as both CSV and JSON.
 
-Latency results (15 questions, 15 queries per config):
+Latency results (15 questions, 15 queries per config, Qwen 3 8B on an 8GB GPU):
 
 | Config | Chunk size | Overlap | Top-K | Avg latency |
 |--------|-----------|---------|-------|-------------|
-| A (baseline) | 512 | 128 | 3 | 5.66s |
-| B (large chunks) | 1024 | 256 | 5 | 13.82s |
-| C (more docs) | 512 | 128 | 5 | 7.12s |
+| A (baseline) | 512 | 128 | 3 | 2.21s |
+| B (large chunks) | 1024 | 256 | 5 | 4.32s |
+| C (more docs) | 512 | 128 | 5 | 3.32s |
 
 Each config builds its own index with its own chunk settings and retrieval depth, so differences reflect the actual configuration.
 
@@ -145,17 +164,17 @@ Scored against 15 test questions. The eval LLM (`qwen2.5:7b`) runs with `format=
 
 | Metric | A (baseline) | B (large chunks) | C (more docs) |
 |--------|-------------|-----------------|--------------|
-| Faithfulness | 0.839 | 0.788 | 0.881 |
-| Answer relevancy | 0.891 | 0.925 | 0.899 |
+| Faithfulness | 0.967 | 0.950 | 0.918 |
+| Answer relevancy | 0.950 | 0.951 | 0.944 |
 | Context recall | 1.000 | 1.000 | 1.000 |
 | Context precision | 1.000 | 1.000 | 1.000 |
-| Avg latency (s) | 5.66 | 13.82 | 7.12 |
+| Avg latency (s) | 2.21 | 4.32 | 3.32 |
 
-Config C (small chunks, top-5 retrieval) gives the best faithfulness with modest latency. Context recall/precision are 1.0 because ground-truth contexts are the full source documents, making retrieval from the same corpus trivially complete — treat them as upper bounds. Config B's large chunks nearly double latency without a faithfulness gain.
+Config A (baseline: small chunks, top-3 retrieval) wins on faithfulness and latency. Context recall/precision are 1.0 because ground-truth contexts are the full source documents, making retrieval from the same corpus trivially complete — treat them as upper bounds.
 
 ## Limitations
 
-- **Local-only LLM**: All inference runs on a single local machine. Latency (~3–4s per query) and quality are constrained by the 8B parameter models. No cloud LLM fallback is configured.
+- **Local-only LLM**: All inference runs on a single local machine (Qwen 3 8B on an 8GB GPU, ~5–7s per query). Quality is constrained by the local model; cloud models can be added via the model settings with a provider API key.
 - **Small corpus**: 14 documents spanning broad topics. Retrieval quality and citation diversity would improve with a larger, more focused domain corpus.
 - **No persistent database**: The system has no relational database. Authentication is limited to a static API key — no user registration, MFA, or session management.
 - **Evaluation scope**: 15 test questions. A larger test set would yield more statistically significant metric comparisons.
@@ -237,15 +256,17 @@ DomainRAG/
 │   │   ├── config.py       # Configuration and security settings
 │   │   ├── ingestion.py    # Builds the FAISS index
 │   │   ├── logger.py       # Structured JSON logger
+│   │   ├── main.py         # FastAPI routes, rate limiting, error handling
+│   │   ├── model_registry.py # Runtime model switching (local + cloud providers)
 │   │   ├── models.py       # Pydantic request/response schemas
 │   │   ├── query_engine.py # Retrieval + LLM generation + circuit breaker
-│   │   └── main.py         # FastAPI routes, rate limiting, error handling
-│   ├── data/raw/           # Source documents (14 Markdown files)
+│   │   └── uploads.py      # Document upload validation and storage
+│   ├── data/raw/           # Source documents (14 Markdown files + uploads)
 │   ├── evaluation/         # Test set and experiment runner
 │   └── requirements.txt    # Pinned Python dependencies
 ├── frontend/
 │   └── src/                # Next.js app
-│       ├── components/     # Chat UI, citation cards, results table
+│       ├── components/     # Chat UI, citation cards, settings modal
 │       └── lib/api.ts      # API client
 └── README.md
 ```

@@ -2,12 +2,17 @@
 
 import { useState, useRef, useEffect } from "react";
 import { CitationCard } from "./citation-card";
-import { queryQuestion, Citation } from "@/lib/api";
+import { SettingsModal } from "./settings-modal";
+import { streamQuery, uploadDocuments, Citation } from "@/lib/api";
 import {
   ArrowUp,
   Loader2,
   X,
-  Globe
+  Globe,
+  Plus,
+  Settings,
+  Check,
+  AlertCircle
 } from "lucide-react";
 
 interface Message {
@@ -17,14 +22,24 @@ interface Message {
   citations?: Citation[];
 }
 
+interface UploadNotice {
+  type: "success" | "error";
+  text: string;
+}
+
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
-  
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState<UploadNotice | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [currentModel, setCurrentModel] = useState("local");
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -53,29 +68,42 @@ export function ChatInterface() {
       inputRef.current.style.height = "auto";
     }
 
+    const assistantMsgId = (Date.now() + 1).toString();
+    const assistantMsg: Message = { id: assistantMsgId, role: "assistant", content: "" };
+    setMessages((prev) => [...prev, assistantMsg]);
+
+    const updateMessage = (fn: (m: Message) => Message) =>
+      setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? fn(m) : m)));
+
     try {
-      const res = await queryQuestion(text);
-      const assistantMsgId = (Date.now() + 1).toString();
-      const assistantMsg: Message = {
-        id: assistantMsgId,
-        role: "assistant",
-        content: res.answer,
-        citations: res.citations,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-      // Open sidebar for the new message if it has citations
-      if (res.citations && res.citations.length > 0) {
-        setActiveMessageId(assistantMsgId);
-      }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "Unable to reach the backend. Make sure the server is running on port 8000.",
+      await streamQuery(text, {
+        onThinking: () => {
+          /* thinking steps are shown via the typing indicator */
         },
-      ]);
+        onCitations: (citations) => {
+          updateMessage((m) => ({ ...m, citations }));
+          setActiveMessageId(assistantMsgId);
+        },
+        onToken: (token) => {
+          updateMessage((m) => ({ ...m, content: m.content + token }));
+        },
+        onDone: () => {
+          /* content already streamed */
+        },
+        onError: (detail) => {
+          updateMessage((m) => ({
+            ...m,
+            content: m.content || detail || "Answer generation failed",
+          }));
+        },
+      });
+    } catch {
+      updateMessage((m) => ({
+        ...m,
+        content:
+          m.content ||
+          "Unable to reach the backend. Make sure the server is running on port 8000.",
+      }));
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -98,6 +126,28 @@ export function ChatInterface() {
   const activeMessage = messages.find(m => m.id === activeMessageId);
   const showSidebar = activeMessageId !== null && activeMessage?.citations && activeMessage.citations.length > 0;
 
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || uploading) return;
+    setUploading(true);
+    setUploadNotice(null);
+    try {
+      const res = await uploadDocuments(Array.from(files));
+      const parts = [`Added ${res.uploaded.length} document${res.uploaded.length === 1 ? "" : "s"}`, ...res.uploaded];
+      if (res.skipped.length > 0) {
+        parts.push(`Skipped ${res.skipped.length}: ${res.skipped.map((s) => s.name).join(", ")}`);
+      }
+      setUploadNotice({ type: "success", text: parts.join(" — ") });
+    } catch (e) {
+      setUploadNotice({
+        type: "error",
+        text: e instanceof Error ? e.message : "Upload failed",
+      });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground font-sans">
       {/* ── Top Header ── */}
@@ -113,6 +163,16 @@ export function ChatInterface() {
               Mixed Tech Wiki
             </span>
           </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-muted-foreground/70 hidden sm:inline">{currentModel}</span>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title="Model settings"
+            className="p-2 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+          >
+            <Settings size={18} />
+          </button>
         </div>
       </header>
 
@@ -193,7 +253,29 @@ export function ChatInterface() {
                 />
                 
                 {/* Input Toolbar */}
-                <div className="flex items-center justify-end px-3 pb-3">
+                <div className="flex items-center justify-between px-3 pb-3">
+                  <div className="flex items-center gap-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".md,.txt,.rst,.pdf"
+                      className="hidden"
+                      onChange={(e) => handleFiles(e.target.files)}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      title="Add documents to the knowledge base"
+                      className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors disabled:opacity-40"
+                    >
+                      {uploading ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Plus size={18} />
+                      )}
+                    </button>
+                  </div>
                   <button
                     onClick={() => handleSubmit()}
                     disabled={loading || !input.trim()}
@@ -207,6 +289,16 @@ export function ChatInterface() {
                   </button>
                 </div>
               </div>
+              {uploadNotice && (
+                <div className={`mt-2 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md ${
+                  uploadNotice.type === "success"
+                    ? "bg-emerald-500/10 text-emerald-600"
+                    : "bg-destructive/10 text-destructive"
+                }`}>
+                  {uploadNotice.type === "success" ? <Check size={13} /> : <AlertCircle size={13} />}
+                  <span className="break-all">{uploadNotice.text}</span>
+                </div>
+              )}
               <div className="text-center mt-3">
                 <span className="text-[11px] text-muted-foreground/50">
                   DomainRAG can make mistakes. Check important info.
@@ -246,6 +338,12 @@ export function ChatInterface() {
           </div>
         )}
       </div>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={(label) => setCurrentModel(label)}
+      />
     </div>
   );
 }
