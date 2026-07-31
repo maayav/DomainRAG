@@ -1,4 +1,5 @@
 """FastAPI application for the RAG system."""
+import os
 import json
 import time
 import logging
@@ -17,13 +18,14 @@ from app.config import (
 )
 from app.models import QueryRequest, QueryResponse, Citation
 from app.ingestion import build_index, load_index
-from app.query_engine import query_index, retrieve_context
+from app.query_engine import query_index, retrieve_context, create_query_engine
 from app.auth import AuthMiddleware, API_KEY
 from app.logger import StructuredLogger
 
 logger = StructuredLogger(__name__)
 
 index = None
+query_engine = None
 
 # Rate limiting state
 _rate_store: dict[str, list[float]] = defaultdict(list)
@@ -42,22 +44,25 @@ def _check_rate_limit(ip: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global index
+    global index, query_engine
     try:
         index = load_index()
         logger.info("Loaded existing index")
     except Exception:
         logger.info("Building new index")
         index = build_index()
+    query_engine = create_query_engine(index)
     yield
 
 
 app = FastAPI(title="DomainRAG", lifespan=lifespan)
 
+# Auth is header-based (x-api-key), so credentials are not needed; origins
+# are configurable via CORS_ORIGINS (comma-separated), defaulting to any origin.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -114,7 +119,7 @@ async def health():
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    result = query_index(index, request.query)
+    result = query_index(index, request.query, query_engine=query_engine)
     return QueryResponse(
         answer=result["answer"],
         citations=[Citation(**c) for c in result["citations"]],

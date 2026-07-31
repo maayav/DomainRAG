@@ -8,28 +8,46 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.faiss import FaissVectorStore
 import faiss
 
-from app.config import DATA_DIR, FAISS_DIR, CHUNK_SIZE, CHUNK_OVERLAP, EMBED_MODEL
+from app import config as cfg
+from app.config import DATA_DIR, FAISS_DIR, EMBED_MODEL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def build_index():
+def _embedding_dimension(embed_model) -> int:
+    """Derive the embedding dimension from the model, not a hardcoded value."""
+    st_model = embed_model._model
+    for attr in ("get_sentence_embedding_dimension", "get_embedding_dimension"):
+        getter = getattr(st_model, attr, None)
+        if getter is not None:
+            return int(getter())
+    return len(embed_model.get_text_embedding("probe"))
+
+
+def build_index(chunk_size: int | None = None, chunk_overlap: int | None = None):
+    chunk_size = chunk_size if chunk_size is not None else cfg.CHUNK_SIZE
+    chunk_overlap = chunk_overlap if chunk_overlap is not None else cfg.CHUNK_OVERLAP
+
     os.makedirs(FAISS_DIR, exist_ok=True)
 
-    Settings.embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
-    Settings.node_parser = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+    embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL)
+    Settings.embed_model = embed_model
+    splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    Settings.node_parser = splitter
+    Settings.transformations = [splitter]
 
     logger.info(f"Loading documents from {DATA_DIR}")
     documents = SimpleDirectoryReader(DATA_DIR).load_data()
     logger.info(f"Loaded {len(documents)} documents")
 
     logger.info("Creating FAISS index")
-    dimension = 384
+    dimension = _embedding_dimension(embed_model)
+    logger.info(f"Embedding dimension: {dimension}")
     faiss_index = faiss.IndexFlatL2(dimension)
     vector_store = FaissVectorStore(faiss_index=faiss_index)
 
-    logger.info("Building vector store index")
+    logger.info(f"Building vector store index (chunk_size={chunk_size}, overlap={chunk_overlap})")
     index = VectorStoreIndex.from_documents(
         documents,
         vector_store=vector_store,

@@ -5,7 +5,7 @@ import logging
 from llama_index.core import Settings
 from llama_index.llms.ollama import Ollama
 
-from app.config import LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT, TOP_K, CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_RESET
+from app import config as cfg
 
 logger = logging.getLogger(__name__)
 
@@ -55,29 +55,34 @@ class CircuitBreaker:
             raise e
 
 
-_circuit_breaker = CircuitBreaker(threshold=CIRCUIT_BREAKER_THRESHOLD, reset_timeout=CIRCUIT_BREAKER_RESET)
+_circuit_breaker = CircuitBreaker(
+    threshold=cfg.CIRCUIT_BREAKER_THRESHOLD,
+    reset_timeout=cfg.CIRCUIT_BREAKER_RESET,
+)
 
 
 def _wrap_ollama():
     return Ollama(
-        model=LLM_MODEL,
-        temperature=LLM_TEMPERATURE,
-        request_timeout=LLM_TIMEOUT,
+        model=cfg.LLM_MODEL,
+        temperature=cfg.LLM_TEMPERATURE,
+        request_timeout=cfg.LLM_TIMEOUT,
     )
 
 
-def create_query_engine(index):
+def create_query_engine(index, top_k: int | None = None):
     Settings.llm = _wrap_ollama()
+    top_k = top_k if top_k is not None else cfg.TOP_K
     query_engine = index.as_query_engine(
-        similarity_top_k=TOP_K,
+        similarity_top_k=top_k,
         response_mode="compact",
     )
     return query_engine
 
 
-def query_index(index, question: str):
-    engine = create_query_engine(index)
-    response = _circuit_breaker.call(engine.query, question)
+def query_index(index, question: str, top_k: int | None = None, query_engine=None):
+    if query_engine is None:
+        query_engine = create_query_engine(index, top_k=top_k)
+    response = _circuit_breaker.call(query_engine.query, question)
 
     citations = []
     for node in response.source_nodes:
@@ -95,9 +100,9 @@ def query_index(index, question: str):
     }
 
 
-def retrieve_context(index, question: str):
-    Settings.embed_model = index._embed_model
-    retriever = index.as_retriever(similarity_top_k=TOP_K)
+def retrieve_context(index, question: str, top_k: int | None = None):
+    top_k = top_k if top_k is not None else cfg.TOP_K
+    retriever = index.as_retriever(similarity_top_k=top_k)
     nodes = retriever.retrieve(question)
 
     citations = []

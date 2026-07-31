@@ -6,7 +6,7 @@ What is the difference between LEFT JOIN and RIGHT JOIN?,LEFT JOIN returns all r
 What is Docker Compose used for?,Defining and running multi-container Docker applications using a YAML configuration file.,docker-compose.md
 What does docker compose down -v do?,Tears down all services and removes named volumes.,docker-compose.md
 What is the purpose of git rebase?,To rewrite commit history by moving or combining commits onto a different base.,git-rebase.md
-What does chmod 755 mean?,Sets owner to rwx (7), group to r-x (5), and others to r-x (5).,linux-permissions.md
+What does chmod 755 mean?,"Sets owner to rwx (7), group to r-x (5), and others to r-x (5).",linux-permissions.md
 What is the sticky bit used for?,Restricts file deletion in shared directories so only owners can delete their own files.,linux-permissions.md
 What is a RESTful resource?,A named abstraction identified by a URL that clients interact with using standard HTTP methods like GET POST PUT and DELETE.,rest-api-design.md
 What HTTP status code indicates a successful resource creation?,201 Created.,rest-api-design.md

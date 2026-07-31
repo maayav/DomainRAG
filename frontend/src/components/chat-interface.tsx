@@ -2,13 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { CitationCard } from "./citation-card";
-import { queryQuestion, Citation, healthCheck } from "@/lib/api";
+import { queryQuestion, Citation } from "@/lib/api";
 import {
   ArrowUp,
   Loader2,
-  Paperclip,
-  Mic,
-  Settings,
   X,
   Globe
 } from "lucide-react";
@@ -117,9 +114,6 @@ export function ChatInterface() {
             </span>
           </div>
         </div>
-        <button className="p-2 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
-          <Settings size={18} />
-        </button>
       </header>
 
       {/* ── Main Content Area ── */}
@@ -185,14 +179,6 @@ export function ChatInterface() {
           {/* Input Box Area */}
           <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
             <div className="max-w-4xl mx-auto pointer-events-auto">
-              {/* Web Search Pill */}
-              <div className="flex justify-center mb-2">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-background border border-border text-xs text-muted-foreground shadow-sm">
-                  <Globe size={12} />
-                  <span>Web Search Enabled</span>
-                </div>
-              </div>
-
               {/* Input Container */}
               <div className="relative flex flex-col rounded-2xl border border-border bg-background shadow-lg overflow-hidden focus-within:border-muted-foreground/50 transition-colors">
                 <textarea
@@ -207,15 +193,7 @@ export function ChatInterface() {
                 />
                 
                 {/* Input Toolbar */}
-                <div className="flex items-center justify-between px-3 pb-3">
-                  <div className="flex items-center gap-1">
-                    <button className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors">
-                      <Paperclip size={18} />
-                    </button>
-                    <button className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors">
-                      <Mic size={18} />
-                    </button>
-                  </div>
+                <div className="flex items-center justify-end px-3 pb-3">
                   <button
                     onClick={() => handleSubmit()}
                     disabled={loading || !input.trim()}
@@ -254,12 +232,9 @@ export function ChatInterface() {
             
             {/* Tabs */}
             <div className="flex items-center border-b border-border px-4">
-              <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-foreground text-foreground">
+              <span className="px-4 py-2.5 text-sm font-medium border-b-2 border-foreground text-foreground">
                 Citations
-              </button>
-              <button className="px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors">
-                Evaluation
-              </button>
+              </span>
             </div>
 
             {/* Sidebar Content (Citations) */}

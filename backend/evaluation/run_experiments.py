@@ -5,7 +5,6 @@ import json
 import time
 import csv
 import logging
-from copy import deepcopy
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -23,41 +22,35 @@ TEST_SET_PATH = os.path.join(os.path.dirname(__file__), "test_set.csv")
 
 
 def load_test_set():
+    from app.evaluation import resolve_contexts
+
     questions, answers, contexts = [], [], []
     with open(TEST_SET_PATH, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
             questions.append(row["question"])
             answers.append(row["answer"])
-            contexts.append([row["contexts"]])
+            contexts.append(resolve_contexts([row["contexts"]]))
     return questions, answers, contexts
 
 
 def run_experiment(config_name, config):
-    from app.ingestion import build_index, load_index
+    from app.ingestion import build_index
     from app.query_engine import query_index
-    from app import config as cfg
     from app.evaluation import run_ragas_eval
 
-    cfg.CHUNK_SIZE = config["chunk_size"]
-    cfg.CHUNK_OVERLAP = config["chunk_overlap"]
-    cfg.TOP_K = config["top_k"]
+    logger.info(f"Building index for {config_name} (chunk_size={config['chunk_size']}, "
+                f"chunk_overlap={config['chunk_overlap']})")
+    index = build_index(chunk_size=config["chunk_size"], chunk_overlap=config["chunk_overlap"])
 
     questions, answers, contexts = load_test_set()
     generated_answers = []
     retrieved_contexts = []
     latencies = []
 
-    try:
-        index = load_index()
-        logger.info(f"Loaded existing index for {config_name}")
-    except Exception:
-        index = build_index()
-        logger.info(f"Built new index for {config_name}")
-
     for q in questions:
         start = time.time()
-        result = query_index(index, q)
+        result = query_index(index, q, top_k=config["top_k"])
         elapsed = time.time() - start
         generated_answers.append(result["answer"])
         retrieved_contexts.append([c["text"] for c in result["citations"]])

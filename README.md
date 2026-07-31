@@ -8,7 +8,7 @@ A RAG assistant that answers questions from a curated tech knowledge base, shows
 
 ```
 Next.js frontend → FastAPI backend → LlamaIndex → FAISS vector store
-                                              → Ollama (Llama 3.2)
+                                              → Ollama (Llama 3.2 + Qwen 2.5)
                                               → RAGAS evaluation
 ```
 
@@ -43,10 +43,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-You also need Ollama with the llama3.2 model:
+You also need Ollama with the chat model (llama3.2) and the evaluation model (qwen2.5:7b):
 
 ```bash
 ollama pull llama3.2
+ollama pull qwen2.5:7b
 ```
 
 Build the vector index:
@@ -120,46 +121,48 @@ Run them all at once:
 
 ```bash
 cd backend
-source .venv/bin/activate
+source venv/bin/activate
 PYTHONPATH=. python evaluation/run_experiments.py
 ```
 
+The eval LLM defaults to `qwen2.5:7b` and can be overridden with the `EVAL_MODEL` environment variable.
+
 Results land in `backend/evaluation/results/` as both CSV and JSON.
 
-Preliminary latency results (15 questions, 15 queries per config):
+Latency results (15 questions, 15 queries per config):
 
 | Config | Chunk size | Overlap | Top-K | Avg latency |
 |--------|-----------|---------|-------|-------------|
-| A (baseline) | 512 | 128 | 3 | 3.67s |
-| B (large chunks) | 1024 | 256 | 5 | 4.36s |
-| C (more docs) | 512 | 128 | 5 | 4.15s |
+| A (baseline) | 512 | 128 | 3 | 5.66s |
+| B (large chunks) | 1024 | 256 | 5 | 13.82s |
+| C (more docs) | 512 | 128 | 5 | 7.12s |
 
-Baseline (smaller chunks, fewer docs) is the fastest. Config C retrieves more context with minimal latency increase.
+Each config builds its own index with its own chunk settings and retrieval depth, so differences reflect the actual configuration.
 
 ### RAGAS metrics
 
-Scored against 15 test questions using the local Llama 3.2 model. Faithfulness requires JSON-structured output from the scoring LLM which small local models may not produce reliably, resulting in NaN.
+Scored against 15 test questions. The eval LLM (`qwen2.5:7b`) runs with `format="json"` to guarantee parseable output, so all metrics produce valid scores. Ground-truth contexts are the full source documents referenced by the test set, and the eval LLM can be overridden via `EVAL_MODEL`.
 
 | Metric | A (baseline) | B (large chunks) | C (more docs) |
 |--------|-------------|-----------------|--------------|
-| Answer relevancy | 0.85 | 0.82 | 0.87 |
-| Context recall | 0.75 | 0.80 | 0.78 |
-| Context precision | 0.50 | 0.55 | 0.60 |
-| Avg latency (s) | 3.67 | 4.36 | 4.15 |
+| Faithfulness | 0.839 | 0.788 | 0.881 |
+| Answer relevancy | 0.891 | 0.925 | 0.899 |
+| Context recall | 1.000 | 1.000 | 1.000 |
+| Context precision | 1.000 | 1.000 | 1.000 |
+| Avg latency (s) | 5.66 | 13.82 | 7.12 |
 
-Config C (smaller chunks, more documents retrieved) offers the best balance of relevancy and precision with reasonable latency.
+Config C (small chunks, top-5 retrieval) gives the best faithfulness with modest latency. Context recall/precision are 1.0 because ground-truth contexts are the full source documents, making retrieval from the same corpus trivially complete — treat them as upper bounds. Config B's large chunks nearly double latency without a faithfulness gain.
 
 ## Limitations
 
-- **Faithfulness metric scores NaN**: RAGAS faithfulness requires the scoring LLM to emit structured JSON. Small local models like Llama 3.2 (8B) often produce unparseable output. Swap in a stronger model (GPT-4, Llama 70B) for accurate faithfulness measurements.
-- **Local-only LLM**: All inference runs on a single local machine. Latency (~3–4s per query) and quality are constrained by the 8B parameter model. No cloud LLM fallback is configured.
+- **Local-only LLM**: All inference runs on a single local machine. Latency (~3–4s per query) and quality are constrained by the 8B parameter models. No cloud LLM fallback is configured.
 - **Small corpus**: 14 documents spanning broad topics. Retrieval quality and citation diversity would improve with a larger, more focused domain corpus.
 - **No persistent database**: The system has no relational database. Authentication is limited to a static API key — no user registration, MFA, or session management.
 - **Evaluation scope**: 15 test questions. A larger test set would yield more statistically significant metric comparisons.
 
 ## Future work
 
-- Swap eval LLM to a larger model (Llama 70B via Ollama, or GPT-4o via API) to get valid faithfulness scores.
+- Swap eval LLM to a larger model (Llama 70B via Ollama, or GPT-4o via API) for higher-quality faithfulness judgments.
 - Add user registration with JWT-based auth, refresh tokens, and scoped API keys.
 - Deploy behind Nginx/Caddy with automatic HTTPS via Let's Encrypt.
 - Add persistent chat history with a lightweight database (SQLite for single-user, PostgreSQL for multi-user).

@@ -4,6 +4,7 @@ export interface Citation {
   score: number;
   text: string;
   source: string;
+  url: string;
 }
 
 export interface QueryResponse {
