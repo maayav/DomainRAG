@@ -1,4 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const DEFAULT_PORT = 8000;
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:${DEFAULT_PORT}`
+    : `http://localhost:${DEFAULT_PORT}`);
 
 export interface Citation {
   score: number;
