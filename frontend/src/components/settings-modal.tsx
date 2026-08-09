@@ -196,6 +196,16 @@ export function SettingsModal({ open, onClose, onSaved }: Props) {
                 </div>
               )}
 
+              {models?.current.fallback_active && (
+                <div className="flex items-start gap-2 rounded-md bg-amber-500/10 text-amber-700 px-3 py-2 text-xs">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    A provider failed earlier, so answers automatically fell back to the
+                    local model ({models.current.model}). Re-select a provider to retry it.
+                  </span>
+                </div>
+              )}
+
               {error && (
                 <div className="flex items-start gap-2 rounded-md bg-destructive/10 text-destructive px-3 py-2 text-xs">
                   <AlertCircle size={14} className="mt-0.5 shrink-0" />

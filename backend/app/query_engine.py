@@ -35,6 +35,11 @@ class CircuitBreaker:
         self.last_failure_time = 0.0
         self.state = "closed"
 
+    def reset(self):
+        self.failure_count = 0
+        self.last_failure_time = 0.0
+        self.state = "closed"
+
     def call(self, func, *args, **kwargs):
         if self.state == "open":
             if time.time() - self.last_failure_time > self.reset_timeout:
@@ -75,31 +80,18 @@ def create_query_engine(index, top_k: int | None = None):
     return query_engine
 
 
-def query_index(index, question: str, top_k: int | None = None, query_engine=None):
-    if query_engine is None:
-        query_engine = create_query_engine(index, top_k=top_k)
-    response = _circuit_breaker.call(query_engine.query, question)
+def _retrieve_filtered(index, question: str, top_k: int | None = None):
+    """Retrieve with a recall cushion, then drop chunks below the similarity floor.
 
-    citations = []
-    for node in response.source_nodes:
-        source_name = node.node.metadata.get("file_name", "unknown")
-        citations.append({
-            "score": float(node.score),
-            "text": node.node.get_content()[:300],
-            "source": source_name,
-            "url": SOURCE_URLS.get(source_name, ""),
-        })
-
-    return {
-        "answer": str(response),
-        "citations": citations,
-    }
-
-
-def retrieve_context(index, question: str, top_k: int | None = None):
+    Retrieves `top_k * 2` candidates so filtering still leaves up to `top_k`
+    genuinely relevant chunks. Returns (context_text, citations).
+    """
     top_k = top_k if top_k is not None else cfg.TOP_K
-    retriever = index.as_retriever(similarity_top_k=top_k)
-    nodes = retriever.retrieve(question)
+    retriever = index.as_retriever(similarity_top_k=top_k * 2)
+    nodes = [
+        node for node in retriever.retrieve(question)
+        if node.score >= cfg.MIN_SIMILARITY
+    ][:top_k]
 
     citations = []
     context_text = ""
@@ -110,8 +102,54 @@ def retrieve_context(index, question: str, top_k: int | None = None):
             "score": float(node.score),
             "text": chunk[:300],
             "source": source_name,
-            "url": SOURCE_URLS.get(source_name, ""),
+            "url": node.node.metadata.get("source_url") or SOURCE_URLS.get(source_name, ""),
         })
         context_text += f"\n---\nSource: {source_name}\n{chunk}\n"
 
     return context_text, citations
+
+
+NO_MATCH_ANSWER = (
+    "I could not find anything relevant in the knowledge base for that question. "
+    "The closest chunks score below the retrieval confidence threshold, so nothing "
+    "was used as context. You could ask about the topics already in the corpus, or "
+    "add a document and ask again."
+)
+
+
+def _complete_with_fallback(prompt: str) -> str:
+    """Generate an answer, auto-falling back to the local model once if the
+    active provider fails (e.g. dead API key, retired model slug, rate limit)."""
+    try:
+        return _circuit_breaker.call(lambda: _wrap_ollama().complete(prompt))
+    except Exception as e:
+        if model_registry.enable_fallback(str(e)):
+            logger.error(f"Provider failed ({e}); retrying on local {model_registry.get_config()['model']}")
+            _circuit_breaker.reset()
+            return _circuit_breaker.call(lambda: _wrap_ollama().complete(prompt))
+        raise
+
+
+def query_index(index, question: str, top_k: int | None = None, query_engine=None):
+    context_text, citations = _retrieve_filtered(index, question, top_k=top_k)
+    if not citations:
+        return {"answer": NO_MATCH_ANSWER, "citations": []}
+
+    prompt = f"""{cfg.SYSTEM_PROMPT}
+
+Context:
+{context_text}
+
+Question: {question}
+
+Answer:"""
+
+    answer = _complete_with_fallback(prompt)
+    return {
+        "answer": str(answer),
+        "citations": citations,
+    }
+
+
+def retrieve_context(index, question: str, top_k: int | None = None):
+    return _retrieve_filtered(index, question, top_k=top_k)

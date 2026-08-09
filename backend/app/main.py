@@ -9,21 +9,25 @@ from collections import defaultdict
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.config import (
     SYSTEM_PROMPT,
     RATE_LIMIT_WINDOW, RATE_LIMIT_MAX,
 )
+from app import config as cfg
 from app.models import (
     QueryRequest, QueryResponse, Citation,
     ModelUpdateRequest, ModelStatus, ModelsResponse, UploadResult,
+    ScrapeRequest, ScrapeResult,
 )
 from app.ingestion import build_index, load_index
-from app.query_engine import query_index, retrieve_context, create_query_engine
+from app.query_engine import query_index, retrieve_context, create_query_engine, NO_MATCH_ANSWER
 from app.auth import AuthMiddleware, API_KEY
 from app.logger import StructuredLogger
 from app import model_registry
 from app.uploads import store_upload, ALLOWED_EXTENSIONS, MAX_FILES_PER_REQUEST
+from app.scraper import scrape_url
 
 logger = StructuredLogger(__name__)
 
@@ -64,7 +68,7 @@ app = FastAPI(title="DomainRAG", lifespan=lifespan)
 # are configurable via CORS_ORIGINS (comma-separated), defaulting to any origin.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=cfg.CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,7 +126,7 @@ async def health():
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    result = query_index(index, request.query, query_engine=query_engine)
+    result = query_index(index, request.query)
     return QueryResponse(
         answer=result["answer"],
         citations=[Citation(**c) for c in result["citations"]],
@@ -147,6 +151,11 @@ async def query_stream(request: QueryRequest):
         yield sse_event("thinking", {"step": f"Found {len(citations)} relevant sources"})
         yield sse_event("citations", citations)
 
+        if not citations:
+            yield sse_event("token", {"text": NO_MATCH_ANSWER})
+            yield sse_event("done", {"answer": NO_MATCH_ANSWER})
+            return
+
         yield sse_event("thinking", {"step": "Generating answer..."})
 
         prompt = f"""{SYSTEM_PROMPT}
@@ -158,21 +167,8 @@ Question: {request.query}
 
 Answer:"""
 
-        llm = model_registry.make_llm()
-
-        full_response = ""
-        try:
-            for token in llm.stream_complete(prompt):
-                chunk = token.delta
-                if chunk:
-                    full_response += chunk
-                    yield sse_event("token", {"text": chunk})
-        except Exception:
-            logger.error("LLM streaming failed", extra={"query": request.query[:100]})
-            yield sse_event("error", {"detail": "Answer generation failed"})
-            return
-
-        yield sse_event("done", {"answer": full_response})
+        for event in stream_answer_from_prompt(prompt):
+            yield event
 
     return StreamingResponse(
         event_generator(),
@@ -211,6 +207,33 @@ async def upload_documents(files: list[UploadFile] = File(...)):
     return UploadResult(
         uploaded=uploaded,
         skipped=skipped,
+        documents=len(index.docstore.docs),
+    )
+
+
+@app.post("/ingest/url", response_model=ScrapeResult)
+async def ingest_url(request: ScrapeRequest):
+    """Scrape a URL (and optionally same-domain linked pages) into the knowledge base."""
+    global index, query_engine
+    try:
+        result = await run_in_threadpool(scrape_url, request.url, request.max_pages)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not result["saved"]:
+        raise HTTPException(
+            status_code=422,
+            detail="No content was extracted from the URL. It may be unreachable, non-HTML, or empty.",
+        )
+
+    logger.info(f"Re-indexing corpus after scraping {len(result['saved'])} page(s)")
+    index = build_index()
+    query_engine = create_query_engine(index)
+
+    return ScrapeResult(
+        saved=result["saved"],
+        skipped=result["skipped"],
+        pages=result["pages"],
         documents=len(index.docstore.docs),
     )
 
@@ -254,3 +277,43 @@ async def reset_model():
 def sse_event(event_type: str, data) -> str:
     """Format a Server-Sent Event."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+def stream_answer_from_prompt(prompt: str):
+    """Yield answer tokens for the prompt, falling back to the local model
+    once if the active provider fails before any token was streamed."""
+    llm = model_registry.make_llm()
+    full_response = ""
+    tokens_sent = False
+    failed = None
+    try:
+        for token in llm.stream_complete(prompt):
+            chunk = token.delta
+            if chunk:
+                tokens_sent = True
+                full_response += chunk
+                yield sse_event("token", {"text": chunk})
+    except Exception as e:
+        failed = e
+    if failed is None:
+        yield sse_event("done", {"answer": full_response})
+        return
+
+    if not tokens_sent and model_registry.enable_fallback(str(failed)[:150]):
+        logger.error("LLM streaming failed; falling back to local model", extra={"error": str(failed)[:150]})
+        yield sse_event("thinking", {"step": "Provider failed — falling back to local model..."})
+        try:
+            llm = model_registry.make_llm()
+            for token in llm.stream_complete(prompt):
+                chunk = token.delta
+                if chunk:
+                    full_response += chunk
+                    yield sse_event("token", {"text": chunk})
+            yield sse_event("done", {"answer": full_response})
+        except Exception as e2:
+            logger.error("LLM streaming failed after fallback", extra={"error": str(e2)[:150]})
+            yield sse_event("error", {"detail": "Answer generation failed"})
+        return
+
+    logger.error("LLM streaming failed", extra={"error": str(failed)[:150]})
+    yield sse_event("error", {"detail": "Answer generation failed"})

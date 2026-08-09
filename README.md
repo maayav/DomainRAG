@@ -12,7 +12,7 @@ Next.js frontend → FastAPI backend → LlamaIndex → FAISS vector store
                                               → RAGAS evaluation
 ```
 
-The frontend sends your question to the backend. LlamaIndex finds relevant chunks from the FAISS index, passes them as context to the local LLM, and returns an answer with source citations. The evaluation pipeline runs RAGAS across different configurations to compare retrieval quality. You can upload your own documents from the UI, and switch the answer model between local Ollama models and OpenAI-compatible providers (OpenAI, Groq, OpenRouter, or a custom endpoint) from the model settings modal.
+The frontend sends your question to the backend. LlamaIndex finds relevant chunks from the FAISS index, passes them as context to the local LLM, and returns an answer with source citations. The evaluation pipeline runs RAGAS across different configurations to compare retrieval quality. You can upload your own documents from the UI, and switch the answer model between local Ollama models and OpenAI-compatible providers (OpenAI, Groq, OpenRouter, OpenCode Zen, or a custom endpoint) from the model settings modal — if a cloud provider fails, the backend automatically falls back to the local model. A **Notes** tab (next to Ask) keeps study notes saved in your browser's local storage.
 
 ## What it knows
 
@@ -94,18 +94,39 @@ The response includes an answer and citations with relevance scores and source f
 
 ### Uploading documents
 
-From the UI, click the **+** icon next to the input box to add your own files (`.md`, `.txt`, `.rst`, `.pdf`, up to 10 MB each, 10 per request). Uploaded files are stored in `backend/data/raw/`, the index is rebuilt, and answers immediately include them. Programmatically:
+From the UI, click the **+** icon next to the input box to add your own files. Supported types: `.md`, `.txt`, `.rst`, `.pdf`, `.html`, `.htm`, `.csv`, `.json`, `.yaml`, `.yml`, `.docx`, `.pptx`, `.xlsx` (up to 10 MB each, 10 per request). Uploaded files are stored in `backend/data/raw/`, the index is rebuilt, and answers immediately include them. Programmatically:
 
 ```bash
 curl -X POST http://localhost:8000/documents -F "files=@my-notes.md"
 ```
 
+### Querying
+
+Retrieval enforces a relevance floor (`MIN_SIMILARITY`, default `0.62`, env `DOMAINRAG_MIN_SIMILARITY`): chunks scoring below it are never passed to the model as context. If nothing clears the floor, the assistant says so instead of guessing. Sources show the chunk similarity score, and answers cite them with footnote markers.
+
+### Scraping web pages
+
+Click the **globe** icon next to the input box to ingest a web page into the knowledge base. The page is fetched, stripped to its readable content, saved as markdown in `backend/data/scraped/`, and the index is rebuilt. Up to 10 pages can be crawled per request — with `max_pages > 1`, additional pages are followed breadth-first on the same domain. Scraped citations link back to the original URL.
+
+```bash
+curl -X POST http://localhost:8000/ingest/url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://docs.python.org/3/library/asyncio.html", "max_pages": 3}'
+```
+
+Scraping is protected against SSRF: private/loopback/link-local addresses (e.g. `localhost`, `192.168.x.x`) are rejected. Timeout and user-agent are configurable via `SCRAPE_TIMEOUT` and `SCRAPE_USER_AGENT`.
+
 ### Switching models
 
 Open the **model settings** (gear icon in the header) to:
 - Pick any model already installed in local Ollama
-- Connect an OpenAI-compatible provider (OpenAI, Groq, OpenRouter, or a custom base URL) with an API key — the key is validated against the provider, held in memory only, and never persisted or returned
+- Connect an OpenAI-compatible provider with an API key — the key is validated against the provider, held in memory only, and never persisted or returned
+- Providers: **Groq** (free tier: Llama 3.3 70B, DeepSeek R1 Distill 70B, Qwen QWQ), **OpenRouter** (free `:free` models), **OpenCode Zen** (free models incl. `deepseek-v4-flash-free`, `big-pickle`, `nemotron-3-ultra-free` — the same models used by the OpenCode CLI; get a key at https://opencode.ai/auth), OpenAI, or any custom OpenAI-compatible base URL
 - Reset back to the local default
+
+**Automatic fallback**: if the active cloud provider fails at run time (dead API key, retired model slug, rate limit), the backend transparently retries the question with the local model and marks the config with `fallback_active` so the UI shows a warning. Both the plain `/query` and the streaming `/query/stream` paths do this.
+
+You can also boot the backend with a cloud provider from the environment (`DOMAINRAG_PROVIDER`, `DOMAINRAG_MODEL`, `DOMAINRAG_PROVIDER_API_KEY`, `DOMAINRAG_BASE_URL`); it is applied without validation and falls back to the local model automatically if it fails.
 
 API: `GET /models` (current config, installed local models, provider options), `POST /models` (apply `{"provider", "model", "api_key", "base_url"}`), `POST /models/reset`.
 
@@ -260,13 +281,15 @@ DomainRAG/
 │   │   ├── model_registry.py # Runtime model switching (local + cloud providers)
 │   │   ├── models.py       # Pydantic request/response schemas
 │   │   ├── query_engine.py # Retrieval + LLM generation + circuit breaker
+│   │   ├── scraper.py      # Web scraping: fetch, extract, save as markdown
 │   │   └── uploads.py      # Document upload validation and storage
 │   ├── data/raw/           # Source documents (14 Markdown files + uploads)
+│   ├── data/scraped/       # Pages ingested via the web scraper
 │   ├── evaluation/         # Test set and experiment runner
 │   └── requirements.txt    # Pinned Python dependencies
 ├── frontend/
 │   └── src/                # Next.js app
-│       ├── components/     # Chat UI, citation cards, settings modal
+│       ├── components/     # Chat UI, citation cards, settings + scrape modals
 │       └── lib/api.ts      # API client
 └── README.md
 ```

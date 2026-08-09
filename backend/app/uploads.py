@@ -3,12 +3,11 @@ import os
 import re
 import logging
 
-from app.config import DATA_DIR, FAISS_DIR
+from app.config import DATA_DIR, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {".md", ".txt", ".rst", ".pdf"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per file
+MAX_FILE_SIZE = MAX_UPLOAD_SIZE
 MAX_FILES_PER_REQUEST = 10
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\-]")

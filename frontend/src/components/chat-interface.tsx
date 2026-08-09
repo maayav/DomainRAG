@@ -1,19 +1,24 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { CitationCard } from "./citation-card";
-import { SettingsModal } from "./settings-modal";
-import { streamQuery, uploadDocuments, Citation } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
 import {
-  ArrowUp,
-  Loader2,
-  X,
-  Globe,
-  Plus,
-  Settings,
   Check,
-  AlertCircle
+  AlertCircle,
+  RotateCcw,
+  Settings,
 } from "lucide-react";
+import { AskInput } from "./ask-input";
+import { WelcomeStage } from "./welcome-stage";
+import { SourceStrip } from "./source-strip";
+import { NotesPanel } from "./notes-panel";
+import { SettingsModal } from "./settings-modal";
+import { ScrapeModal } from "./scrape-modal";
+import {
+  streamQuery,
+  uploadDocuments,
+  healthCheck,
+  Citation,
+} from "@/lib/api";
 
 interface Message {
   id: string;
@@ -31,29 +36,41 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadNotice, setUploadNotice] = useState<UploadNotice | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scrapeOpen, setScrapeOpen] = useState(false);
   const [currentModel, setCurrentModel] = useState("local");
+  const [docCount, setDocCount] = useState<number | null>(null);
+  const [online, setOnline] = useState(false);
+  const [openSources, setOpenSources] = useState<Record<string, boolean>>({});
+  const [view, setView] = useState<"ask" | "notes">("ask");
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom
+  useEffect(() => {
+    let cancelled = false;
+    healthCheck()
+      .then((res) => {
+        if (!cancelled) {
+          setOnline(true);
+          setDocCount(res.documents);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setOnline(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
-
-  // Focus input when messages change (if not loading)
-  useEffect(() => {
-    if (messages.length > 0 && !loading) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [messages.length, loading]);
 
   const handleSubmit = async (query?: string) => {
     const text = query || input.trim();
@@ -64,32 +81,24 @@ export function ChatInterface() {
     setInput("");
     setLoading(true);
 
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
-
     const assistantMsgId = (Date.now() + 1).toString();
     const assistantMsg: Message = { id: assistantMsgId, role: "assistant", content: "" };
     setMessages((prev) => [...prev, assistantMsg]);
+    setOpenSources((prev) => ({ ...prev, [assistantMsgId]: true }));
 
     const updateMessage = (fn: (m: Message) => Message) =>
       setMessages((prev) => prev.map((m) => (m.id === assistantMsgId ? fn(m) : m)));
 
     try {
       await streamQuery(text, {
-        onThinking: () => {
-          /* thinking steps are shown via the typing indicator */
-        },
+        onThinking: () => {},
         onCitations: (citations) => {
           updateMessage((m) => ({ ...m, citations }));
-          setActiveMessageId(assistantMsgId);
         },
         onToken: (token) => {
           updateMessage((m) => ({ ...m, content: m.content + token }));
         },
-        onDone: () => {
-          /* content already streamed */
-        },
+        onDone: () => {},
         onError: (detail) => {
           updateMessage((m) => ({
             ...m,
@@ -106,25 +115,8 @@ export function ChatInterface() {
       }));
     } finally {
       setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
-  };
-
-  const activeMessage = messages.find(m => m.id === activeMessageId);
-  const showSidebar = activeMessageId !== null && activeMessage?.citations && activeMessage.citations.length > 0;
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0 || uploading) return;
@@ -132,11 +124,19 @@ export function ChatInterface() {
     setUploadNotice(null);
     try {
       const res = await uploadDocuments(Array.from(files));
-      const parts = [`Added ${res.uploaded.length} document${res.uploaded.length === 1 ? "" : "s"}`, ...res.uploaded];
+      const parts = [
+        `Added ${res.uploaded.length} document${res.uploaded.length === 1 ? "" : "s"}`,
+        ...res.uploaded,
+      ];
       if (res.skipped.length > 0) {
-        parts.push(`Skipped ${res.skipped.length}: ${res.skipped.map((s) => s.name).join(", ")}`);
+        parts.push(
+          `Skipped ${res.skipped.length}: ${res.skipped.map((s) => s.name).join(", ")}`
+        );
       }
       setUploadNotice({ type: "success", text: parts.join(" — ") });
+      healthCheck()
+        .then((r) => setDocCount(r.documents))
+        .catch(() => {});
     } catch (e) {
       setUploadNotice({
         type: "error",
@@ -148,201 +148,219 @@ export function ChatInterface() {
     }
   };
 
+  const resetConversation = () => {
+    setMessages([]);
+    setInput("");
+    setOpenSources({});
+  };
+
+  const showWelcome = messages.length === 0;
+
   return (
-    <div className="flex flex-col h-full bg-background text-foreground font-sans">
-      {/* ── Top Header ── */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-background z-10 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="text-xl tracking-tight flex items-center">
-            <span className="font-semibold text-foreground">Domain</span>
-            <span className="font-light text-foreground">RAG</span>
+    <div className="flex h-full flex-col bg-background text-foreground">
+      {/* ── Ribbon ── */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-5 md:px-8">
+        <div className="flex items-center gap-4">
+          <div className="font-mono text-[15px] font-bold tracking-tight">
+            domain<span className="text-muted-foreground">/</span>rag
           </div>
-          <div className="hidden md:flex items-center gap-3 ml-2">
-            <span className="text-sm text-muted-foreground">Domain-specific RAG assistant with evaluated retrieval</span>
-            <span className="text-[10px] font-semibold tracking-wider uppercase bg-secondary text-secondary-foreground px-2 py-1 rounded-sm">
-              Mixed Tech Wiki
-            </span>
+          <div className="hidden items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground md:flex">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                online ? "bg-emerald-500" : "bg-destructive"
+              }`}
+            />
+            <span>{online ? "local" : "offline"}</span>
+            {online && docCount !== null && (
+              <>
+                <span className="text-border">·</span>
+                <span>{docCount} chunks</span>
+              </>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px] text-muted-foreground/70 hidden sm:inline">{currentModel}</span>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary/60 p-0.5">
+            {(["ask", "notes"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={`rounded-md px-3 py-1 font-mono text-[11px] tracking-wide transition-colors ${
+                  view === v
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {v === "ask" ? "Ask" : "Notes"}
+              </button>
+            ))}
+          </div>
+          <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
+            {currentModel}
+          </span>
           <button
+            type="button"
+            onClick={resetConversation}
+            title="Start a new conversation"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <RotateCcw size={15} />
+          </button>
+          <button
+            type="button"
             onClick={() => setSettingsOpen(true)}
             title="Model settings"
-            className="p-2 rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
-            <Settings size={18} />
+            <Settings size={16} />
           </button>
         </div>
       </header>
 
-      {/* ── Main Content Area ── */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Left Column: Chat Area */}
-        <div className="flex-1 flex flex-col relative min-w-0">
-          
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 md:px-8 py-6 custom-scrollbar">
-            <div className="max-w-4xl mx-auto space-y-8 pb-32">
-              {messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full min-h-[40vh]">
-                  <p className="text-muted-foreground text-sm">Ask a technical question to get started...</p>
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div key={msg.id} className={`flex w-full animate-message-in ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    
+      {/* ── Conversation ── */}
+      <main className="relative flex min-h-0 flex-1 flex-col">
+        {view === "notes" ? (
+          <NotesPanel />
+        ) : (
+          <>     
+        <div ref={scrollRef} className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 md:px-8">
+          <div className="mx-auto w-full max-w-3xl">
+            {showWelcome ? (
+              <WelcomeStage
+                docCount={docCount}
+                online={online}
+                onSubmit={handleSubmit}
+              />
+            ) : (
+              <div className="space-y-8 pb-40 pt-8">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex w-full animate-message-in ${
+                      msg.role === "user" ? "justify-end" : "justify-start"
+                    }`}
+                  >
                     {msg.role === "user" ? (
-                      <div className="max-w-[80%] bg-secondary/60 text-secondary-foreground px-5 py-3.5 rounded-2xl text-[15px] leading-relaxed">
+                      <div className="max-w-[80%] rounded-2xl border border-border bg-secondary/70 px-4 py-2.5 text-[15px] leading-relaxed text-secondary-foreground">
                         {msg.content}
                       </div>
                     ) : (
-                      <div className="max-w-[90%] md:max-w-[85%]">
-                        <div 
-                          className="text-[15px] leading-relaxed text-foreground cursor-text whitespace-pre-wrap"
-                          onClick={() => {
-                            if (msg.citations && msg.citations.length > 0) {
-                              setActiveMessageId(msg.id);
+                      <div className="w-full max-w-[92%]">
+                        {msg.content ? (
+                          <p className="text-[15px] leading-[1.75] whitespace-pre-wrap">
+                            {msg.content}
+                            {msg.citations && msg.citations.length > 0 && (
+                              <sup
+                                className="cite-mark"
+                                onClick={() =>
+                                  setOpenSources((prev) => ({
+                                    ...prev,
+                                    [msg.id]: !prev[msg.id],
+                                  }))
+                                }
+                                role="button"
+                                aria-label="Toggle sources"
+                              >
+                                {msg.citations.map((_, i) => `[${i + 1}]`).join(" ")}
+                              </sup>
+                            )}
+                          </p>
+                        ) : (
+                          <div className="flex items-center gap-1.5 py-3">
+                            <span
+                              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse-dot"
+                              style={{ animationDelay: "0ms" }}
+                            />
+                            <span
+                              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse-dot"
+                              style={{ animationDelay: "200ms" }}
+                            />
+                            <span
+                              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse-dot"
+                              style={{ animationDelay: "400ms" }}
+                            />
+                          </div>
+                        )}
+                        {msg.citations && msg.citations.length > 0 && (
+                          <SourceStrip
+                            citations={msg.citations}
+                            open={!!openSources[msg.id]}
+                            onToggle={() =>
+                              setOpenSources((prev) => ({
+                                ...prev,
+                                [msg.id]: !prev[msg.id],
+                              }))
                             }
-                          }}
-                        >
-                          {msg.content}
-                        </div>
-                        {/* Optional subtle indicator that citations exist if sidebar is closed */}
-                        {msg.citations && msg.citations.length > 0 && activeMessageId !== msg.id && (
-                          <button 
-                            onClick={() => setActiveMessageId(msg.id)}
-                            className="mt-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                          >
-                            <Globe size={12} /> View {msg.citations.length} Citations
-                          </button>
+                          />
                         )}
                       </div>
                     )}
                   </div>
-                ))
-              )}
-
-              {/* Typing indicator */}
-              {loading && (
-                <div className="flex justify-start w-full animate-message-in">
-                  <div className="flex items-center gap-1.5 py-4 px-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "200ms" }} />
-                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse-dot" style={{ animationDelay: "400ms" }} />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Input Box Area */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
-            <div className="max-w-4xl mx-auto pointer-events-auto">
-              {/* Input Container */}
-              <div className="relative flex flex-col rounded-2xl border border-border bg-background shadow-lg overflow-hidden focus-within:border-muted-foreground/50 transition-colors">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={autoResize}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask a technical question..."
-                  disabled={loading}
-                  rows={1}
-                  className="w-full bg-transparent text-[15px] resize-none outline-none placeholder:text-muted-foreground/60 max-h-40 disabled:opacity-50 px-4 py-4 min-h-[80px]"
-                />
-                
-                {/* Input Toolbar */}
-                <div className="flex items-center justify-between px-3 pb-3">
-                  <div className="flex items-center gap-1">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".md,.txt,.rst,.pdf"
-                      className="hidden"
-                      onChange={(e) => handleFiles(e.target.files)}
-                    />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                      title="Add documents to the knowledge base"
-                      className="p-2 rounded-md hover:bg-secondary text-muted-foreground transition-colors disabled:opacity-40"
-                    >
-                      {uploading ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : (
-                        <Plus size={18} />
-                      )}
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => handleSubmit()}
-                    disabled={loading || !input.trim()}
-                    className="w-8 h-8 rounded-md flex items-center justify-center bg-secondary hover:bg-secondary-foreground hover:text-background text-foreground disabled:opacity-30 transition-all cursor-pointer disabled:cursor-not-allowed"
-                  >
-                    {loading ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <ArrowUp size={16} strokeWidth={2} />
-                    )}
-                  </button>
-                </div>
+                ))}
               </div>
-              {uploadNotice && (
-                <div className={`mt-2 flex items-center gap-1.5 text-xs px-3 py-2 rounded-md ${
-                  uploadNotice.type === "success"
-                    ? "bg-emerald-500/10 text-emerald-600"
-                    : "bg-destructive/10 text-destructive"
-                }`}>
-                  {uploadNotice.type === "success" ? <Check size={13} /> : <AlertCircle size={13} />}
-                  <span className="break-all">{uploadNotice.text}</span>
-                </div>
-              )}
-              <div className="text-center mt-3">
-                <span className="text-[11px] text-muted-foreground/50">
-                  DomainRAG can make mistakes. Check important info.
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Right Column: Context Explorer Sidebar */}
-        {showSidebar && (
-          <div className="w-[350px] shrink-0 border-l border-border bg-background flex flex-col animate-fade-in z-20">
-            {/* Sidebar Header */}
-            <div className="flex items-center justify-between px-5 py-4">
-              <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">Context Explorer</h2>
-              <button 
-                onClick={() => setActiveMessageId(null)}
-                className="p-1 rounded-md hover:bg-secondary text-muted-foreground transition-colors"
+        {/* ── Composer ── */}
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-14 md:px-8">
+          <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+            {uploadNotice && (
+              <div
+                className={`mb-2 flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs ${
+                  uploadNotice.type === "success"
+                    ? "bg-emerald-500/10 text-emerald-600"
+                    : "bg-destructive/10 text-destructive"
+                }`}
               >
-                <X size={16} />
-              </button>
-            </div>
-            
-            {/* Tabs */}
-            <div className="flex items-center border-b border-border px-4">
-              <span className="px-4 py-2.5 text-sm font-medium border-b-2 border-foreground text-foreground">
-                Citations
-              </span>
-            </div>
-
-            {/* Sidebar Content (Citations) */}
-            <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4 custom-scrollbar bg-secondary/10">
-              {activeMessage?.citations?.map((c, i) => (
-                <CitationCard key={i} citation={c} index={i + 1} />
-              ))}
-            </div>
+                {uploadNotice.type === "success" ? (
+                  <Check size={13} />
+                ) : (
+                  <AlertCircle size={13} />
+                )}
+                <span className="break-all">{uploadNotice.text}</span>
+              </div>
+            )}
+            <AskInput
+              value={input}
+              onChange={setInput}
+              onSubmit={() => handleSubmit()}
+              loading={loading}
+              uploading={uploading}
+              onUpload={() => fileInputRef.current?.click()}
+              onScrape={() => setScrapeOpen(true)}
+              placeholder="Ask the technical wiki..."
+              autoFocus
+              focusSignal={messages.length}
+            />
+            <p className="mt-2.5 text-center font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/50">
+              Local-first — nothing leaves this machine
+            </p>
           </div>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".md,.txt,.rst,.pdf,.html,.htm,.csv,.json,.yaml,.yml,.docx,.pptx,.xlsx"
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+        </>
         )}
-      </div>
+      </main>
 
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSaved={(label) => setCurrentModel(label)}
+      />
+      <ScrapeModal
+        open={scrapeOpen}
+        onClose={() => setScrapeOpen(false)}
       />
     </div>
   );

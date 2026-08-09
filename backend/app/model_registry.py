@@ -1,4 +1,5 @@
 """Runtime model configuration: switch between local Ollama and OpenAI-compatible providers."""
+import os
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -14,6 +15,11 @@ logger = logging.getLogger(__name__)
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Providers that expose an OpenAI-compatible API.
+# "models" lists are curated free-tier options shown in the UI; models without
+# "/" or ":" in the id are additionally validated against the provider's
+# live model list when a config is applied. If a model 404s at query time,
+# model_registry.enable_fallback() reverts the active config to the local
+# default model automatically.
 OPENAI_COMPATIBLE_PROVIDERS = {
     "openai": {
         "label": "OpenAI",
@@ -23,16 +29,40 @@ OPENAI_COMPATIBLE_PROVIDERS = {
     "groq": {
         "label": "Groq (free tier)",
         "base_url": "https://api.groq.com/openai/v1",
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen-qwq-32b", "deepseek-r1-distill-llama-70b"],
+        "models": [
+            "llama-3.3-70b-versatile",
+            "llama-3.3-70b-specdec",
+            "llama-3.1-8b-instant",
+            "deepseek-r1-distill-llama-70b",
+            "qwen-qwq-32b",
+            "gemma-2-9b-it",
+        ],
     },
     "openrouter": {
         "label": "OpenRouter (free models)",
         "base_url": "https://openrouter.ai/api/v1",
         "models": [
             "meta-llama/llama-3.3-70b-instruct:free",
+            "llama/llama-3.3-70b-instruct:free",
             "deepseek/deepseek-chat-v3-0324:free",
             "qwen/qwen-2.5-72b-instruct:free",
+            "google/gemini-2.0-flash-exp:free",
+            "mistralai/mistral-small-3.1-24b-instruct:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
             "nousresearch/hermes-3-llama-3.1-405b:free",
+        ],
+    },
+    "zen": {
+        "label": "OpenCode Zen (free + OpenAI-compatible)",
+        "base_url": "https://opencode.ai/zen/v1",
+        "models": [
+            "deepseek-v4-flash-free",
+            "big-pickle",
+            "mimo-v2.5-free",
+            "nemotron-3-ultra-free",
+            "north-mini-code-free",
+            "ling-3.0-tiny-free",
+            "deepseek-v4-flash",
         ],
     },
     "custom": {
@@ -51,8 +81,37 @@ class ModelConfig:
     api_key: str = ""  # kept in memory only; never returned by the API
 
 
+def _provider_base_url(provider: str) -> str:
+    info = OPENAI_COMPATIBLE_PROVIDERS.get(provider)
+    return info["base_url"] if info else ""
+
+
 _state_lock = threading.Lock()
-_config = ModelConfig()
+
+
+def _initial_config() -> ModelConfig:
+    """Bootstrap the active provider from the environment (for containers/ops).
+
+    Applies raw without network validation; a failing provider automatically
+    falls back to the local model on the first query.
+    """
+    provider = os.environ.get("DOMAINRAG_PROVIDER", "ollama").strip().lower()
+    if provider == "ollama":
+        return ModelConfig()
+    if provider not in OPENAI_COMPATIBLE_PROVIDERS:
+        logger.warning("Ignoring unknown DOMAINRAG_PROVIDER '%s'", provider)
+        return ModelConfig()
+    api_key = os.environ.get("DOMAINRAG_PROVIDER_API_KEY", "").strip()
+    if not api_key:
+        logger.warning("DOMAINRAG_PROVIDER=%s set without DOMAINRAG_PROVIDER_API_KEY - using local model", provider)
+        return ModelConfig()
+    model = os.environ.get("DOMAINRAG_MODEL", "deepseek-v4-flash-free").strip()
+    base_url = os.environ.get("DOMAINRAG_BASE_URL", "").strip() or _provider_base_url(provider)
+    return ModelConfig(provider=provider, model=model, base_url=base_url, api_key=api_key)
+
+
+_config = _initial_config()
+_fallback_active = False
 
 
 def get_config() -> dict:
@@ -63,16 +122,13 @@ def get_config() -> dict:
             "model": _config.model,
             "base_url": _config.base_url,
             "using_local": _config.provider == "ollama",
+            "fallback_active": _fallback_active,
         }
-
-
-def _provider_base_url(provider: str) -> str:
-    info = OPENAI_COMPATIBLE_PROVIDERS.get(provider)
-    return info["base_url"] if info else ""
 
 
 def update_config(provider: str, model: str, api_key: str = "", base_url: str = "") -> dict:
     """Validate and apply a new model configuration. Raises ValueError on invalid input."""
+    global _fallback_active
     provider = provider.strip().lower()
     model = model.strip()
     if not model:
@@ -82,6 +138,8 @@ def update_config(provider: str, model: str, api_key: str = "", base_url: str = 
         installed = installed_local_models()
         if installed and model not in installed:
             raise ValueError(f"Model '{model}' is not installed locally. Pull it first: ollama pull {model}")
+        with _state_lock:
+            _fallback_active = False
         _set_config(ModelConfig(provider="ollama", model=model))
         return get_config()
 
@@ -93,14 +151,35 @@ def update_config(provider: str, model: str, api_key: str = "", base_url: str = 
     base_url = base_url.strip() or _provider_base_url(provider)
     _validate_openai_compatible(base_url, model, api_key.strip())
 
+    with _state_lock:
+        _fallback_active = False
     _set_config(ModelConfig(provider=provider, model=model, base_url=base_url, api_key=api_key.strip()))
     return get_config()
 
 
 def reset_config() -> dict:
-    """Revert to the local Ollama default model."""
+    """Revert to the local Ollama default model and clear any fallback state."""
+    global _fallback_active
+    with _state_lock:
+        _fallback_active = False
     _set_config(ModelConfig())
     return get_config()
+
+
+def enable_fallback(reason: str = "") -> bool:
+    """Switch the active config back to the default local model after a provider failure.
+
+    Returns True if a failing cloud provider was replaced, False when already
+    running on the local model (or when local models are unavailable).
+    """
+    global _fallback_active, _config
+    with _state_lock:
+        if _config.provider == "ollama":
+            return False
+        _fallback_active = True
+        _config = ModelConfig(provider="ollama", model=LLM_MODEL)
+    logger.warning(f"Provider failed ({reason or 'unknown error'}) - falling back to local {LLM_MODEL}")
+    return True
 
 
 def _set_config(cfg: ModelConfig):

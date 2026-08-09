@@ -19,6 +19,7 @@ CONFIGS = {
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 TEST_SET_PATH = os.path.join(os.path.dirname(__file__), "test_set.csv")
+INDEX_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "experiment_indexes")
 
 
 def load_test_set():
@@ -39,9 +40,16 @@ def run_experiment(config_name, config):
     from app.query_engine import query_index
     from app.evaluation import run_ragas_eval
 
+    # Each config gets its own scratch index so experiment builds never
+    # overwrite the production index, and uploaded/scraped docs are excluded
+    # so all configs are compared on the curated base corpus only.
+    persist_dir = os.path.join(INDEX_ROOT, config_name)
+    os.makedirs(persist_dir, exist_ok=True)
+
     logger.info(f"Building index for {config_name} (chunk_size={config['chunk_size']}, "
                 f"chunk_overlap={config['chunk_overlap']})")
-    index = build_index(chunk_size=config["chunk_size"], chunk_overlap=config["chunk_overlap"])
+    index = build_index(chunk_size=config["chunk_size"], chunk_overlap=config["chunk_overlap"],
+                        persist_dir=persist_dir, include_uploads=False)
 
     questions, answers, contexts = load_test_set()
     generated_answers = []

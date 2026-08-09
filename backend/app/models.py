@@ -39,6 +39,7 @@ class ModelStatus(BaseModel):
     model: str
     base_url: str = ""
     using_local: bool
+    fallback_active: bool = False
 
 
 class ModelsResponse(BaseModel):
@@ -50,4 +51,16 @@ class ModelsResponse(BaseModel):
 class UploadResult(BaseModel):
     uploaded: list[str]
     skipped: list[dict]
+    documents: int
+
+
+class ScrapeRequest(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2048)
+    max_pages: int = Field(1, ge=1, le=10)
+
+
+class ScrapeResult(BaseModel):
+    saved: list[str]
+    skipped: list[dict]
+    pages: int
     documents: int

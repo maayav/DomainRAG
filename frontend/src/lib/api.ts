@@ -17,6 +17,7 @@ export interface ModelStatus {
   model: string;
   base_url: string;
   using_local: boolean;
+  fallback_active: boolean;
 }
 
 export interface ProviderInfo {
@@ -34,6 +35,13 @@ export interface ModelsResponse {
 export interface UploadResponse {
   uploaded: string[];
   skipped: { name: string; reason: string }[];
+  documents: number;
+}
+
+export interface ScrapeResponse {
+  saved: string[];
+  skipped: { url: string; reason: string }[];
+  pages: number;
   documents: number;
 }
 
@@ -164,4 +172,13 @@ export async function uploadDocuments(files: File[]): Promise<UploadResponse> {
   for (const f of files) form.append("files", f);
   const res = await fetch(`${API_BASE}/documents`, { method: "POST", body: form });
   return handle<UploadResponse>(res);
+}
+
+export async function scrapeUrl(url: string, maxPages = 1): Promise<ScrapeResponse> {
+  const res = await fetch(`${API_BASE}/ingest/url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, max_pages: maxPages }),
+  });
+  return handle<ScrapeResponse>(res);
 }

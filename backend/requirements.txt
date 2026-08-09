@@ -7,6 +7,9 @@ sentence-transformers==5.6.1
 fastapi==0.141.1
 uvicorn==0.52.0
 python-multipart==0.0.32
+pypdf==6.15.0
+trafilatura==2.2.0
+beautifulsoup4==4.15.0
 pandas==3.0.5
 ragas==0.4.3
 datasets==5.0.1
@@ -14,3 +17,8 @@ langchain-ollama==1.1.0
 langchain-huggingface==1.2.2
 langchain-community==0.3.31
 langchain-google-vertexai==3.2.4
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+llama-index-readers-file==0.6.0
+docx2txt==0.9

@@ -6,9 +6,12 @@ __pycache__/
 .venv_old/
 venv/
 
-# Data
+# Data (indexes and ingested corpora are rebuilt at runtime)
 backend/data/faiss_index/
 backend/data/processed/
+backend/data/uploads/
+backend/data/scraped/
+backend/data/experiment_indexes/
 
 # IDE
 .vscode/
