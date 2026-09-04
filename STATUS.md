@@ -21,15 +21,13 @@ Last updated: 2026-09-04
 - `backend/tests/verify_pipeline.py`: fallback e2e now exercises the OpenCode Zen provider path.
 - `.opencode/`: local agent skills.
 
-### JARTRON agent run (2026-09-04, session in progress)
-- JARTRON (the local agent app) was pointed at DomainRAG to complete/verify the project.
-- It verified: ingestion, backend boot, `/query`, the verification suite (`tests/verify_pipeline.py`), frontend lint/build, and started the full A/B/C evaluation run.
-- The evaluation run produced no results files (runner output/exit needs investigation — see "What to do next").
-- The agent's full completion report is pending; its token budget was raised and approvals auto-granted.
+### JARTRON agent run (2026-09-04) — COMPLETED
+- JARTRON (the local agent app) completed the project: verify suite 76/76, backend tests, frontend lint/build/boot, reduced evaluation (config A, 5-question set — real numbers: relevancy 0.964, recall 1.0, precision 1.0, latency 2.15s), README updated, committed as `2c8f293` and pushed.
+- Agent's top-5 improvements: (1) fix faithfulness-eval reliability (timeouts vs qwen2.5:7b), (2) resumable/parameterized experiment runner, (3) cache the embedding model, (4) parallelize RAGAS jobs, (5) per-sample score reporting.
 
 ## What to do next
 
-1. **Evaluation run**: `cd backend && PYTHONPATH=. ./venv/bin/python evaluation/run_experiments.py` — investigate why it produced no output (check `evaluation/run_experiments.py` for env deps, e.g. `EVAL_MODEL`, Ollama availability of `qwen2.5:7b` — it IS installed). Confirm `backend/evaluation/results/comparison.{csv,json}` regenerate with real numbers.
+1. **Full evaluation run**: the reduced config-A run succeeded; run the full A/B/C comparison after applying the agent's reliability fixes (bump EVAL timeout / num_ctx or use a remote eval LLM; resumable runner; parallel judgement jobs).
 2. **Frontend polish**: run `npm run lint`/`build` and fix any warnings; add the screenshots mentioned in README "Future work" (chat UI with citations, results table).
 3. **Recommended improvements** (from the JARTRON QA session):
    - Expand the corpus + test set (50 docs / 100 Q&A) for statistically meaningful RAGAS metrics.
