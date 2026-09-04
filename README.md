@@ -169,36 +169,34 @@ The eval LLM defaults to `qwen2.5:7b` and can be overridden with the `EVAL_MODEL
 
 Results land in `backend/evaluation/results/` as both CSV and JSON.
 
-Latency results (15 questions, 15 queries per config, Qwen 3 8B on an 8GB GPU):
+Latency results (config A only — the full 3-config/15-question run exceeded ~15 min, so results were regenerated with a reduced 5-question set; Qwen 3 8B):
 
 | Config | Chunk size | Overlap | Top-K | Avg latency |
 |--------|-----------|---------|-------|-------------|
-| A (baseline) | 512 | 128 | 3 | 2.21s |
-| B (large chunks) | 1024 | 256 | 5 | 4.32s |
-| C (more docs) | 512 | 128 | 5 | 3.32s |
+| A (baseline) | 512 | 128 | 3 | 2.15s |
 
 Each config builds its own index with its own chunk settings and retrieval depth, so differences reflect the actual configuration.
 
 ### RAGAS metrics
 
-Scored against 15 test questions. The eval LLM (`qwen2.5:7b`) runs with `format="json"` to guarantee parseable output, so all metrics produce valid scores. Ground-truth contexts are the full source documents referenced by the test set, and the eval LLM can be overridden via `EVAL_MODEL`.
+Scored against 5 test questions (reduced set; see Limitations). The eval LLM (`qwen2.5:7b`) runs with `format="json"`. Ground-truth contexts are the full source documents referenced by the test set, and the eval LLM can be overridden via `EVAL_MODEL`.
 
-| Metric | A (baseline) | B (large chunks) | C (more docs) |
-|--------|-------------|-----------------|--------------|
-| Faithfulness | 0.967 | 0.950 | 0.918 |
-| Answer relevancy | 0.950 | 0.951 | 0.944 |
-| Context recall | 1.000 | 1.000 | 1.000 |
-| Context precision | 1.000 | 1.000 | 1.000 |
-| Avg latency (s) | 2.21 | 4.32 | 3.32 |
+| Metric | A (baseline) |
+|--------|-------------|
+| Faithfulness | n/a (eval LLM timeouts) |
+| Answer relevancy | 0.964 |
+| Context recall | 1.000 |
+| Context precision | 1.000 |
+| Avg latency (s) | 2.15 |
 
-Config A (baseline: small chunks, top-3 retrieval) wins on faithfulness and latency. Context recall/precision are 1.0 because ground-truth contexts are the full source documents, making retrieval from the same corpus trivially complete — treat them as upper bounds.
+Faithfulness could not be computed because several RAGAS judgement jobs timed out against the local eval LLM; the other metrics produced valid scores. Context recall/precision are 1.0 because ground-truth contexts are the full source documents, making retrieval from the same corpus trivially complete — treat them as upper bounds.
 
 ## Limitations
 
 - **Local-only LLM**: All inference runs on a single local machine (Qwen 3 8B on an 8GB GPU, ~5–7s per query). Quality is constrained by the local model; cloud models can be added via the model settings with a provider API key.
 - **Small corpus**: 14 documents spanning broad topics. Retrieval quality and citation diversity would improve with a larger, more focused domain corpus.
 - **No persistent database**: The system has no relational database. Authentication is limited to a static API key — no user registration, MFA, or session management.
-- **Evaluation scope**: 15 test questions. A larger test set would yield more statistically significant metric comparisons.
+- **Evaluation scope**: The last run captured only config A with 5 questions (full run exceeded ~15 min and RAGAS faithfulness jobs timed out). Results in `backend/evaluation/results/` are marked `reduced`. A larger test set and a faster/remote eval LLM would yield statistically significant metric comparisons.
 
 ## Future work
 
