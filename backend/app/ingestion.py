@@ -62,7 +62,12 @@ def build_index(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
 
     embed_model = create_embed_model()
     Settings.embed_model = embed_model
-    Settings.node_parser = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    # Set node_parser AND transformations explicitly: llama-index lazily caches
+    # Settings.transformations on first access, so a stale default parser can
+    # otherwise survive into later rebuilds (server process) and skip chunking.
+    splitter = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    Settings.node_parser = splitter
+    Settings.transformations = [splitter]
 
     documents = load_documents(include_uploads=include_uploads)
     if not documents:
@@ -89,7 +94,7 @@ def build_index(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP,
 
 
 def load_index(persist_dir=FAISS_DIR):
-    from llama_index import StorageContext, load_index_from_storage, Settings as LoadSettings
+    from llama_index.core import StorageContext, load_index_from_storage, Settings as LoadSettings
 
     LoadSettings.embed_model = create_embed_model()
 

@@ -277,8 +277,8 @@ def api_checks():
 def fallback_e2e_checks():
     section("D. Fallback — e2e on a second instance (port 8001)")
     env = dict(os.environ, PYTHONPATH=".",
-               DOMAINRAG_PROVIDER="openai",
-               DOMAINRAG_MODEL="gpt-4o-mini",
+               DOMAINRAG_PROVIDER="zen",
+               DOMAINRAG_MODEL="deepseek-v4-flash-free",
                DOMAINRAG_PROVIDER_API_KEY="sk-bogus-does-not-exist",
                DOMAINRAG_BASE_URL="")
     env.pop("DOMAINRAG_API_KEY", None)
@@ -298,10 +298,10 @@ def fallback_e2e_checks():
                     break
             except httpx.HTTPError:
                 time.sleep(1)
-        check("fallback instance boots", ok)
+        check("fallback instance boots with unknown model name", ok)
         if ok:
             r = c.get("/models")
-            check("boots with broken provider", r.json()["current"]["provider"] == "openai"
+            check("boots with broken zen provider", r.json()["current"]["provider"] == "zen"
                   and r.json()["current"]["fallback_active"] is False)
             r = c.post("/query/stream", json={"query": "what is a Python decorator?"})
             events = parse_sse(r.text) if r.status_code == 200 else {}

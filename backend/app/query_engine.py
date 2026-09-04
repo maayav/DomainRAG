@@ -3,6 +3,7 @@ import time
 import logging
 
 from llama_index.core import Settings
+from llama_index.core.indices.prompt_helper import PromptHelper, ChatPromptHelper
 
 from app import config as cfg
 from app import model_registry
@@ -72,6 +73,18 @@ def _wrap_ollama():
 
 def create_query_engine(index, top_k: int | None = None):
     Settings.llm = _wrap_ollama()
+    # Provide fixed prompt helpers so prompt sizing never depends on the
+    # active LLM's metadata (non-OpenAI model ids like qwen2.5:7b or
+    # deepseek-v4-flash-free are not in llama-index's model-name tables).
+    Settings.prompt_helper = PromptHelper(
+        context_window=cfg.LLM_CONTEXT_WINDOW,
+        num_output=512,
+    )
+    Settings.chat_prompt_helper = ChatPromptHelper(
+        context_window=cfg.LLM_CONTEXT_WINDOW,
+        num_output=512,
+    )
+    Settings.context_window = cfg.LLM_CONTEXT_WINDOW
     top_k = top_k if top_k is not None else cfg.TOP_K
     query_engine = index.as_query_engine(
         similarity_top_k=top_k,

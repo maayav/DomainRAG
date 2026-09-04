@@ -8,7 +8,7 @@ from llama_index.core import Settings
 from llama_index.llms.ollama import Ollama
 from llama_index.llms.openai import OpenAI
 
-from app.config import LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT
+from app.config import LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT, LLM_CONTEXT_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ def make_llm():
             # Default context_window=-1 makes llama-index request the model's
             # full context (128K), overflowing the 8GB GPU and offloading to
             # CPU. Cap it so the KV cache fits on the GPU.
-            context_window=8192,
+            context_window=LLM_CONTEXT_WINDOW,
         )
     else:
         llm = OpenAI(
@@ -215,6 +215,7 @@ def make_llm():
             temperature=LLM_TEMPERATURE,
             timeout=LLM_TIMEOUT,
             max_retries=2,
+            context_window=LLM_CONTEXT_WINDOW,
         )
     Settings.llm = llm
     return llm

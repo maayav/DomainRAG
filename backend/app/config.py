@@ -12,6 +12,10 @@ CHUNK_SIZE = 512
 CHUNK_OVERLAP = 128
 TOP_K = 3
 
+# Token budget shared by the LLM and the prompt helper; caps the KV cache so
+# local inference stays on the GPU.
+LLM_CONTEXT_WINDOW = int(os.environ.get("DOMAINRAG_CONTEXT_WINDOW", "8192"))
+
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 LLM_MODEL = os.environ.get("DOMAINRAG_LLM_MODEL", "qwen3:8b")
 LLM_TEMPERATURE = 0.1
